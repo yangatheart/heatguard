@@ -6,11 +6,14 @@ This is a working prototype for investor and customer demos. It uses simulated w
 
 ## Run it
 
+Requires Node.js 20 or newer (developed on Node 22).
+
 ```bash
-export PATH=$HOME/.local/node/bin:$PATH   # Node 22 was installed locally (no system changes)
 npm install
 npm run dev                                # http://localhost:3000
 ```
+
+If Node is installed somewhere that isn't on your `PATH`, add it first, for example `export PATH=$HOME/.local/node/bin:$PATH`.
 
 Production build: `npm run build && npm start`.
 
