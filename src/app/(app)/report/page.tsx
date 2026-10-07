@@ -4,6 +4,7 @@ import { CircleAlert, FileText, Printer, RefreshCw, Sparkles } from "lucide-reac
 import { useState } from "react";
 import { Banner, Button, Card, EmptyState, PageHeader, RiskBadge, SimulatedTag } from "@/components/ui";
 import { peakWindow, type ReportFacts } from "@/lib/analytics";
+import { actionsFor, templateSummary } from "@/lib/report";
 import { hhmm } from "@/lib/format";
 import { estimateWbgt, levelRank } from "@/lib/risk-engine";
 import { useDemo } from "@/lib/store";
@@ -74,6 +75,13 @@ export default function ReportPage() {
     setStatus("loading");
     const f = buildFacts();
     setFacts(f);
+    // Static hosting (GitHub Pages) has no report API: build the rule-based report in the browser.
+    if (process.env.NEXT_PUBLIC_STATIC_EXPORT === "true") {
+      await new Promise((r) => setTimeout(r, 600));
+      setReport({ summary: templateSummary(f), actions: actionsFor(f), source: "template", generatedAt: new Date().toISOString() });
+      setStatus("done");
+      return;
+    }
     try {
       const ctrl = new AbortController();
       const timer = setTimeout(() => ctrl.abort(), 45_000);

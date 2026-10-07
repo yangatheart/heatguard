@@ -4,6 +4,10 @@
 
 This is a working prototype for investor and customer demos. It uses simulated worker and wearable data: it shows the workflow and the commercial concept, and makes no claim of clinical or occupational-health efficacy.
 
+**Live demo:** https://yangatheart.github.io/heatguard/
+
+Every push to `main` rebuilds the site with `.github/workflows/pages.yml`. GitHub Pages only serves static files, so the hosted version has no report API. Its Daily Report always uses the rule-based summary; the AI summary is available only when you run the app locally with an API key. Each visitor's demo state stays in their own browser.
+
 ## Run it
 
 ```bash
