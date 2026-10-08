@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * The central HeatGuard workflow:
+ * The central SiteSafe SI workflow (Sense → Understand → Act → Record):
  * Risk detected → Alert sent → Intervention confirmed → Record created.
  * A single modal driven by context so any screen can open it for an alert.
  */
@@ -12,6 +12,8 @@ import {
   CircleCheck,
   ClipboardCheck,
   Droplets,
+  Gauge,
+  Pause,
   ShieldAlert,
   Siren,
   Sun,
@@ -22,7 +24,8 @@ import {
 } from "lucide-react";
 import Link from "next/link";
 import { createContext, useCallback, useContext, useState, type ReactNode } from "react";
-import { hhmm, relativeTime, cx } from "@/lib/format";
+import { hhmm, relativeTime, cx, workLabel } from "@/lib/format";
+import { RECOMMENDATION_LABEL } from "@/lib/risk-engine";
 import { useDemo } from "@/lib/store";
 import type { Alert, InterventionType, SafetyLogEntry } from "@/lib/types";
 import { Button, Modal, RiskBadge } from "./ui";
@@ -33,11 +36,12 @@ const WorkflowCtx = createContext<{ open: (alertId: string, mode?: Mode) => void
 export const useWorkflow = () => useContext(WorkflowCtx)!;
 
 const ACTIONS: { type: InterventionType; icon: LucideIcon; hint: string }[] = [
-  { type: "Cooling break", icon: Wind, hint: "Configured recovery break in cooling area" },
-  { type: "Hydration", icon: Droplets, hint: "Water / electrolytes provided" },
-  { type: "Move to shade", icon: Sun, hint: "Relocate to shaded rest area" },
-  { type: "Work rotation", icon: Timer, hint: "Optional — rotate to lighter task" },
-  { type: "Escalated to site medic", icon: Siren, hint: "Follow site emergency procedure" },
+  { type: "Hydration", icon: Droplets, hint: "Water stations stocked and announced to the team" },
+  { type: "Cooling/rest break", icon: Wind, hint: "Configured break in the cooling/rest area — resets exposure" },
+  { type: "Move activity to shade", icon: Sun, hint: "Relocate the activity to a shaded area where possible" },
+  { type: "Work rotation", icon: Timer, hint: "Rotate the team to a lighter task" },
+  { type: "Pause task", icon: Pause, hint: "Stop the task until conditions are reassessed" },
+  { type: "Escalated to site safety manager", icon: Siren, hint: "Follow the site escalation procedure" },
 ];
 
 export function WorkflowProvider({ children }: { children: ReactNode }) {
@@ -58,17 +62,18 @@ export function WorkflowProvider({ children }: { children: ReactNode }) {
 function WorkflowModal({ alertId, mode, onClose }: { alertId: string; mode: Mode; onClose: () => void }) {
   const { state, confirmIntervention, dismissAlert } = useDemo();
   const alert = state.alerts.find((a) => a.id === alertId);
-  const worker = alert && state.workers.find((w) => w.id === alert.worker_id);
-  const [actions, setActions] = useState<InterventionType[]>(
-    mode === "escalate" ? ["Escalated to site medic", "Cooling break", "Hydration"] : ["Cooling break", "Hydration", "Move to shade"],
-  );
+  const task = alert && state.tasks.find((t) => t.id === alert.task_id);
+  const [actions, setActions] = useState<InterventionType[]>(() => {
+    const rec = alert?.recommended.length ? alert.recommended : (["Hydration", "Cooling/rest break"] as InterventionType[]);
+    return mode === "escalate" ? ["Escalated to site safety manager", ...rec] : rec;
+  });
   const [supervisor, setSupervisor] = useState(state.supervisor);
   const [notes, setNotes] = useState("");
   const [reason, setReason] = useState("");
   const [saved, setSaved] = useState<SafetyLogEntry | null>(null);
   const [now] = useState(() => new Date().toISOString());
 
-  if (!alert || !worker) return null;
+  if (!alert || !task) return null;
 
   const toggle = (t: InterventionType) => setActions((a) => (a.includes(t) ? a.filter((x) => x !== t) : [...a, t]));
 
@@ -79,7 +84,9 @@ function WorkflowModal({ alertId, mode, onClose }: { alertId: string; mode: Mode
       <Modal open onClose={onClose}>
         <div className="p-6 sm:p-8">
           <p className="text-xs font-medium tracking-wide text-ink-3 uppercase">Review alert</p>
-          <h2 className="mt-1 text-xl font-semibold">Dismiss alert for {worker.name}?</h2>
+          <h2 className="mt-1 text-xl font-semibold">
+            Dismiss alert for {task.name} · {alert.snapshot.zone}?
+          </h2>
           <p className="mt-2 text-sm text-ink-2">
             Supervisors can override a risk assessment. The override and your reason are recorded in the safety log.
           </p>
@@ -88,7 +95,7 @@ function WorkflowModal({ alertId, mode, onClose }: { alertId: string; mode: Mode
             value={reason}
             onChange={(e) => setReason(e.target.value)}
             rows={3}
-            placeholder="e.g. Worker already on scheduled break; sensor placement checked"
+            placeholder="e.g. Team already on scheduled break; zone sensor placement checked"
             className="mt-1.5 w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-ink-3"
           />
           <div className="mt-6 flex justify-end gap-2">
@@ -121,16 +128,18 @@ function WorkflowModal({ alertId, mode, onClose }: { alertId: string; mode: Mode
         </div>
         <h2 className="mt-3 text-2xl font-semibold tracking-tight">{mode === "escalate" ? "Escalate alert" : "Intervention confirmed"}</h2>
         <div className="mt-2 flex flex-wrap items-center gap-2 text-sm text-ink-2">
-          <span className="font-medium text-ink">{worker.name}</span>
+          <span className="font-medium text-ink">{task.name}</span>
           <span>·</span>
-          <span>{worker.task}</span>
+          <span>{alert.snapshot.zone}</span>
+          <span>·</span>
+          <span>{task.team}</span>
           <RiskBadge level={alert.severity} />
           <span className="tabular">{alert.snapshot.score}/100</span>
         </div>
 
         <p className="mt-6 text-sm font-medium">Actions taken</p>
         <div className="mt-2 space-y-2">
-          {ACTIONS.filter((a) => mode === "escalate" || a.type !== "Escalated to site medic").map(({ type, icon: Icon, hint }) => {
+          {ACTIONS.filter((a) => mode === "escalate" || a.type !== "Escalated to site safety manager").map(({ type, icon: Icon, hint }) => {
             const on = actions.includes(type);
             return (
               <button
@@ -146,7 +155,10 @@ function WorkflowModal({ alertId, mode, onClose }: { alertId: string; mode: Mode
                 </span>
                 <Icon className="h-4 w-4 text-ink-2" />
                 <span className="flex-1">
-                  <span className="block text-sm font-medium">{type}</span>
+                  <span className="block text-sm font-medium">
+                    {type}
+                    {alert.recommended.includes(type) && <span className="ml-2 text-[11px] font-normal text-ink-3">Recommended</span>}
+                  </span>
                   <span className="block text-xs text-ink-3">{hint}</span>
                 </span>
               </button>
@@ -175,7 +187,7 @@ function WorkflowModal({ alertId, mode, onClose }: { alertId: string; mode: Mode
           value={notes}
           onChange={(e) => setNotes(e.target.value)}
           rows={2}
-          placeholder="Optional — e.g. Worker reports feeling fine; resumes at 15:10 on lighter task"
+          placeholder="Optional — e.g. Roof crew moved to shaded prep work until 16:00"
           className="mt-1.5 w-full rounded-xl border border-line px-3 py-2 text-sm outline-none focus:border-ink-3"
         />
 
@@ -211,7 +223,7 @@ function RecordedSheet({ entry, alert, onClose }: { entry: SafetyLogEntry; alert
         </div>
         <h2 className="mt-4 text-2xl font-semibold tracking-tight">Safety action recorded</h2>
         <p className="mt-1 text-sm text-ink-2">
-          {entry.worker_name} · {entry.intervention} · by {entry.supervisor}
+          {entry.task} · {entry.zone} · {entry.intervention} · by {entry.supervisor}
         </p>
 
         <ol className="mt-8 grid grid-cols-2 gap-3 text-left sm:grid-cols-4 sm:gap-0">
@@ -228,7 +240,7 @@ function RecordedSheet({ entry, alert, onClose }: { entry: SafetyLogEntry; alert
         </ol>
 
         <p className="mx-auto mt-8 max-w-sm text-xs text-ink-3">
-          Worker reassessed against cooling-area conditions. Record is timestamped and attributed for audit.
+          Task reassessed with the confirmed interventions applied. Record is timestamped and attributed for audit.
         </p>
         <div className="mt-6 flex flex-col justify-center gap-2 sm:flex-row">
           <Link href="/safety-log" onClick={onClose}>
@@ -245,13 +257,14 @@ function RecordedSheet({ entry, alert, onClose }: { entry: SafetyLogEntry; alert
   );
 }
 
-/** Alert card used on the dashboard, worker detail and demo mode. */
+/** Alert card used on the dashboard, task detail and the risk simulator. */
 export function AlertCard({ alert, compact }: { alert: Alert; compact?: boolean }) {
   const { state } = useDemo();
   const { open } = useWorkflow();
-  const worker = state.workers.find((w) => w.id === alert.worker_id);
-  if (!worker) return null;
+  const task = state.tasks.find((t) => t.id === alert.task_id);
+  if (!task) return null;
   const critical = alert.severity === "CRITICAL";
+  const s = alert.snapshot;
   return (
     <div className={cx("animate-fade-up rounded-2xl border bg-white p-5", critical ? "border-critical/30" : "border-high/30")}>
       <div className="flex items-start justify-between gap-3">
@@ -268,20 +281,31 @@ export function AlertCard({ alert, compact }: { alert: Alert; compact?: boolean 
       </div>
 
       <div className="mt-4">
-        <Link href={`/workers/${worker.id}`} className="text-[15px] font-medium hover:underline">
-          {worker.name}
+        <Link href={`/tasks/${task.id}`} className="text-[15px] font-medium hover:underline">
+          {s.task}
         </Link>
-        <p className="text-sm text-ink-2">{alert.snapshot.task}</p>
+        <p className="text-sm text-ink-2">
+          {s.team} · {workLabel(s.intensity)} · {s.score}/100
+        </p>
         <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-sm text-ink-2">
           <span className="inline-flex items-center gap-1">
             <Thermometer className="h-3.5 w-3.5" />
-            {alert.snapshot.temperature}°C · {alert.snapshot.humidity}% humidity
+            {s.temperature}°C · {s.humidity}% · {s.wind_kmh} km/h
+          </span>
+          <span className="inline-flex items-center gap-1">
+            <Gauge className="h-3.5 w-3.5" />
+            WBGT {s.wbgt}°C
           </span>
           <span className="inline-flex items-center gap-1">
             <Timer className="h-3.5 w-3.5" />
-            {alert.snapshot.exposure} min continuous exposure
+            {s.exposure} min exposure
           </span>
         </div>
+        {alert.trigger.length > 0 && (
+          <p className="mt-2 text-xs text-ink-3">
+            Trigger: <span className="text-ink-2">{alert.trigger.join(" · ")}</span>
+          </p>
+        )}
       </div>
 
       {!compact && alert.recommended.length > 0 && (
@@ -291,7 +315,7 @@ export function AlertCard({ alert, compact }: { alert: Alert; compact?: boolean 
             {alert.recommended.map((r) => (
               <li key={r} className="flex items-center gap-2 text-sm">
                 <span className="h-1 w-1 rounded-full bg-ink-2" />
-                {r}
+                {RECOMMENDATION_LABEL[r]}
               </li>
             ))}
           </ul>
@@ -307,7 +331,7 @@ export function AlertCard({ alert, compact }: { alert: Alert; compact?: boolean 
           Escalate
         </Button>
         <Button variant="ghost" onClick={() => open(alert.id, "review")}>
-          Dismiss / Review
+          Dismiss with reason
         </Button>
       </div>
     </div>

@@ -2,31 +2,15 @@
 
 /**
  * Client-side demo store. Holds the whole demo state, persists it to localStorage
- * and exposes the workflow actions (simulate → alert → intervene → log).
+ * and exposes the workflow actions (sense → understand → act → record).
  * In production these actions map to API routes backed by supabase/schema.sql.
  */
 import { createContext, useCallback, useContext, useEffect, useMemo, useState, type ReactNode } from "react";
-import { COOLING_AREA, SUPERVISOR, buildSeed } from "./demo-data";
-import {
-  DEFAULT_THRESHOLDS,
-  assessRisk,
-  estimateWbgt,
-  levelRank,
-  recommendedActions,
-  type RiskResult,
-  type Thresholds,
-} from "./risk-engine";
-import type {
-  Alert,
-  Intervention,
-  InterventionType,
-  SafetyLogEntry,
-  SensorReading,
-  Site,
-  Worker,
-} from "./types";
+import { SUPERVISOR, buildAlert, buildSeed } from "./demo-data";
+import { DEFAULT_THRESHOLDS, assessTask, levelRank, type RiskResult, type Thresholds } from "./risk-engine";
+import type { Alert, Intensity, Intervention, InterventionType, SafetyLogEntry, Site, Task, Worker, Zone } from "./types";
 
-const STORAGE_KEY = "heatguard-demo-v1";
+const STORAGE_KEY = "sitesafe-demo-v1";
 
 export interface SiteConfig {
   coolingArea: string;
@@ -36,7 +20,7 @@ export interface SiteConfig {
 }
 
 export interface AlertPrefs {
-  workerAlerts: boolean;
+  teamLeadAlerts: boolean;
   supervisorAlerts: boolean;
   escalation: boolean;
   escalationMinutes: number;
@@ -44,15 +28,15 @@ export interface AlertPrefs {
 
 export interface DemoState {
   sites: Site[];
+  zones: Zone[];
+  tasks: Task[];
   workers: Worker[];
-  readings: Record<string, SensorReading>;
   alerts: Alert[];
   interventions: Intervention[];
   log: SafetyLogEntry[];
   thresholds: Thresholds;
   siteConfig: SiteConfig;
   alertPrefs: AlertPrefs;
-  wearablesEnabled: boolean;
   currentSiteId: string;
   supervisor: string;
 }
@@ -64,16 +48,14 @@ function initialState(): DemoState {
     interventions: [],
     thresholds: { ...DEFAULT_THRESHOLDS },
     siteConfig: { coolingArea: "Tent B — north gate", hydrationAvailable: true, breakMinutes: 15, maxContinuousExposure: 60 },
-    alertPrefs: { workerAlerts: true, supervisorAlerts: true, escalation: true, escalationMinutes: 5 },
-    wearablesEnabled: true,
+    alertPrefs: { teamLeadAlerts: true, supervisorAlerts: true, escalation: true, escalationMinutes: 5 },
     currentSiteId: "madrid",
     supervisor: SUPERVISOR,
   };
 }
 
-export type ReadingPatch = Partial<
-  Pick<SensorReading, "temperature" | "humidity" | "heart_rate" | "activity_level" | "exposure_minutes" | "shade_available" | "ppe_level" | "solar">
->;
+export type ZonePatch = Partial<Pick<Zone, "temperature" | "humidity" | "wind_kmh" | "solar">>;
+export type TaskPatch = Partial<Pick<Task, "intensity" | "exposure_minutes" | "ppe" | "shade" | "cooling" | "scenario_hour">>;
 
 export interface ConfirmInput {
   alertId: string;
@@ -85,16 +67,18 @@ export interface ConfirmInput {
 
 interface Ctx {
   state: DemoState | null;
-  assess: (workerId: string) => RiskResult;
+  assess: (taskId: string) => RiskResult;
   setSite: (id: string) => void;
-  simulate: (workerId: string, patch: ReadingPatch) => { before: RiskResult; after: RiskResult; alert?: Alert };
+  simulate: (taskId: string, patch: { zone: ZonePatch; task: TaskPatch }) => { before: RiskResult; after: RiskResult; alert?: Alert };
   confirmIntervention: (input: ConfirmInput) => SafetyLogEntry;
   dismissAlert: (alertId: string, reason: string) => void;
-  updateSettings: (patch: Partial<Pick<DemoState, "thresholds" | "siteConfig" | "alertPrefs" | "wearablesEnabled" | "supervisor">>) => void;
+  updateSettings: (patch: Partial<Pick<DemoState, "thresholds" | "siteConfig" | "alertPrefs" | "supervisor">>) => void;
   resetDemo: () => void;
 }
 
 const StoreContext = createContext<Ctx | null>(null);
+
+const LIGHTER: Record<Intensity, Intensity> = { Heavy: "Moderate", Moderate: "Low", Low: "Low" };
 
 export function StoreProvider({ children }: { children: ReactNode }) {
   const [state, setState] = useState<DemoState | null>(null);
@@ -119,45 +103,34 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     }
   }, [state]);
 
-  const assessWith = useCallback((s: DemoState, workerId: string, reading?: SensorReading): RiskResult => {
-    const w = s.workers.find((x) => x.id === workerId)!;
-    const r = reading ?? s.readings[workerId];
-    const hr = s.wearablesEnabled ? r.heart_rate : null;
-    return assessRisk({ ...r, heart_rate: hr, baseline_heart_rate: w.baseline_heart_rate }, s.thresholds);
+  const assessWith = useCallback((s: DemoState, taskId: string, task?: Task, zone?: Zone): RiskResult => {
+    const t = task ?? s.tasks.find((x) => x.id === taskId)!;
+    const z = zone ?? s.zones.find((x) => x.id === t.zone_id)!;
+    return assessTask(t, z, s.thresholds);
   }, []);
 
-  const assess = useCallback((workerId: string) => assessWith(state!, workerId), [state, assessWith]);
+  const assess = useCallback((taskId: string) => assessWith(state!, taskId), [state, assessWith]);
 
   const setSite = useCallback((id: string) => setState((s) => (s ? { ...s, currentSiteId: id } : s)), []);
 
   const simulate = useCallback<Ctx["simulate"]>(
-    (workerId, patch) => {
+    (taskId, patch) => {
       const s = state!;
-      const w = s.workers.find((x) => x.id === workerId)!;
-      const prev = s.readings[workerId];
+      const prevTask = s.tasks.find((x) => x.id === taskId)!;
+      const prevZone = s.zones.find((x) => x.id === prevTask.zone_id)!;
       const nowIso = new Date().toISOString();
-      const next: SensorReading = { ...prev, ...patch, timestamp: nowIso };
-      next.wbgt = estimateWbgt(next.temperature, next.humidity);
-      const before = assessWith(s, workerId);
-      const after = assessWith(s, workerId, next);
+      const task: Task = { ...prevTask, ...patch.task, updated_at: nowIso };
+      const zone: Zone = { ...prevZone, ...patch.zone, updated_at: nowIso };
+      const before = assessWith(s, taskId);
+      const after = assessWith(s, taskId, task, zone);
 
-      // One open alert per worker: a HIGH/CRITICAL reading re-raises the open alert
+      // One open alert per task: a HIGH/CRITICAL assessment re-raises the open alert
       // with the latest snapshot, or creates a new one. Alerts never auto-close —
       // only a supervisor can confirm, escalate or dismiss them.
       let alert: Alert | undefined;
-      const open = s.alerts.find((a) => a.worker_id === workerId && a.status === "active");
+      const open = s.alerts.find((a) => a.task_id === taskId && a.status === "active");
       if (levelRank(after.level) >= levelRank("HIGH")) {
-        alert = {
-          id: open?.id ?? `al_${workerId}_${Date.now()}`,
-          worker_id: workerId,
-          risk_assessment_id: `ra_${workerId}_${Date.now()}`,
-          severity: after.level,
-          message: `${after.level === "CRITICAL" ? "Critical" : "High"} heat risk detected`,
-          status: "active",
-          created_at: nowIso,
-          recommended: recommendedActions(after.level, after.factors),
-          snapshot: { temperature: next.temperature, humidity: next.humidity, exposure: next.exposure_minutes, task: w.task, score: after.score },
-        };
+        alert = buildAlert(task, zone, after, nowIso, open?.id ?? `al_${taskId}_${Date.now()}`);
       }
 
       setState((cur) => {
@@ -165,8 +138,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
         const alerts = alert ? [alert, ...cur.alerts.filter((a) => a.id !== alert.id)] : cur.alerts;
         return {
           ...cur,
-          readings: { ...cur.readings, [workerId]: next },
-          workers: cur.workers.map((x) => (x.id === workerId && x.status !== "Working" && levelRank(after.level) >= 2 ? { ...x, status: "Working" } : x)),
+          zones: cur.zones.map((z) => (z.id === zone.id ? zone : z)),
+          tasks: cur.tasks.map((t) => (t.id === taskId ? { ...task, status: alert ? "Active" : t.status } : t)),
           alerts,
         };
       });
@@ -179,7 +152,8 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     ({ alertId, actions, supervisor, notes, mode }) => {
       const s = state!;
       const alert = s.alerts.find((a) => a.id === alertId)!;
-      const w = s.workers.find((x) => x.id === alert.worker_id)!;
+      const task = s.tasks.find((x) => x.id === alert.task_id)!;
+      const zone = s.zones.find((x) => x.id === task.zone_id)!;
       const nowIso = new Date().toISOString();
       const intervention: Intervention = {
         id: `iv_${Date.now()}`,
@@ -191,44 +165,38 @@ export function StoreProvider({ children }: { children: ReactNode }) {
       };
       const entry: SafetyLogEntry = {
         id: `log_${Date.now()}`,
-        worker_id: w.id,
-        worker_name: w.name,
-        site_id: w.site_id,
-        task: w.task,
+        site_id: task.site_id,
+        zone_id: zone.id,
+        zone: zone.name,
+        task_id: task.id,
+        task: task.name,
+        team: task.team,
+        conditions: { temperature: alert.snapshot.temperature, humidity: alert.snapshot.humidity, wbgt: alert.snapshot.wbgt },
         risk_level: alert.severity,
         score: alert.snapshot.score,
+        trigger: alert.trigger,
+        recommended: alert.recommended,
         intervention: actions.join(" + ") || "No action recorded",
         resolution: mode === "escalate" ? "Escalated" : "Resolved",
         supervisor,
         notes: notes || undefined,
         timestamp: nowIso,
       };
-      const takesBreak = actions.some((a) => a === "Cooling break" || a === "Move to shade");
+
+      // Apply the confirmed actions to the task's operational inputs, then reassess.
+      const next: Task = { ...task, updated_at: nowIso, status: actions.includes("Pause task") ? "Paused" : "Intervention in place" };
+      if (actions.includes("Cooling/rest break") || actions.includes("Pause task")) next.exposure_minutes = 0;
+      if (actions.includes("Move activity to shade")) next.shade = "Good";
+      if (actions.includes("Work rotation")) next.intensity = LIGHTER[task.intensity];
 
       setState((cur) => {
         if (!cur) return cur;
-        const prev = cur.readings[w.id];
-        // Recovery break: reassess the worker against cooling-area conditions.
-        const reading: SensorReading = takesBreak
-          ? {
-              ...prev,
-              ...COOLING_AREA,
-              wbgt: estimateWbgt(COOLING_AREA.temperature, COOLING_AREA.humidity),
-              activity_level: "Low",
-              exposure_minutes: 0,
-              shade_available: "Good",
-              timestamp: nowIso,
-            }
-          : prev;
         return {
           ...cur,
           alerts: cur.alerts.map((a) => (a.id === alertId ? { ...a, status: mode === "escalate" ? "escalated" : "resolved" } : a)),
           interventions: [intervention, ...cur.interventions],
           log: [entry, ...cur.log],
-          readings: { ...cur.readings, [w.id]: reading },
-          workers: cur.workers.map((x) =>
-            x.id === w.id ? { ...x, status: takesBreak ? "Cooling down" : actions.includes("Work rotation") ? "Working" : x.status } : x,
-          ),
+          tasks: cur.tasks.map((t) => (t.id === task.id ? next : t)),
         };
       });
       return entry;
@@ -240,15 +208,20 @@ export function StoreProvider({ children }: { children: ReactNode }) {
     (alertId, reason) => {
       const s = state!;
       const alert = s.alerts.find((a) => a.id === alertId)!;
-      const w = s.workers.find((x) => x.id === alert.worker_id)!;
+      const task = s.tasks.find((x) => x.id === alert.task_id)!;
       const entry: SafetyLogEntry = {
         id: `log_${Date.now()}`,
-        worker_id: w.id,
-        worker_name: w.name,
-        site_id: w.site_id,
-        task: w.task,
+        site_id: task.site_id,
+        zone_id: task.zone_id,
+        zone: alert.snapshot.zone,
+        task_id: task.id,
+        task: task.name,
+        team: task.team,
+        conditions: { temperature: alert.snapshot.temperature, humidity: alert.snapshot.humidity, wbgt: alert.snapshot.wbgt },
         risk_level: alert.severity,
         score: alert.snapshot.score,
+        trigger: alert.trigger,
+        recommended: alert.recommended,
         intervention: "Supervisor override — alert dismissed",
         resolution: "Dismissed",
         supervisor: s.supervisor,
@@ -288,4 +261,35 @@ export function useStore() {
 export function useDemo() {
   const ctx = useStore();
   return { ...ctx, state: ctx.state! };
+}
+
+/** Derived site view used by the dashboard, sites page and report. */
+export function siteSnapshot(state: DemoState, siteId: string, assess: (taskId: string) => RiskResult) {
+  const zones = state.zones.filter((z) => z.site_id === siteId);
+  const tasks = state.tasks
+    .filter((t) => t.site_id === siteId)
+    .map((task) => ({ task, zone: zones.find((z) => z.id === task.zone_id)!, risk: assess(task.id) }))
+    .sort((a, b) => b.risk.score - a.risk.score);
+  const zoneRows = zones
+    .map((zone) => {
+      const zt = tasks.filter((t) => t.zone.id === zone.id);
+      const top = zt[0];
+      return { zone, tasks: zt, level: top?.risk.level ?? "LOW", top };
+    })
+    .sort((a, b) => levelRank(b.level) - levelRank(a.level) || (b.top?.risk.score ?? 0) - (a.top?.risk.score ?? 0));
+  const taskIds = new Set(tasks.map((t) => t.task.id));
+  const activeAlerts = state.alerts.filter((a) => a.status === "active" && taskIds.has(a.task_id));
+  const weekStart = new Date();
+  weekStart.setHours(0, 0, 0, 0);
+  weekStart.setDate(weekStart.getDate() - 6);
+  const confirmedThisWeek = state.log.filter((e) => e.site_id === siteId && e.resolution !== "Dismissed" && new Date(e.timestamp) >= weekStart).length;
+  return {
+    zones: zoneRows,
+    tasks,
+    activeAlerts,
+    highRiskZones: zoneRows.filter((z) => levelRank(z.level) >= 2),
+    highRiskTasks: tasks.filter((t) => levelRank(t.risk.level) >= 2),
+    recommended: [...new Set(activeAlerts.flatMap((a) => a.recommended))],
+    confirmedThisWeek,
+  };
 }

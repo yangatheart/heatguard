@@ -1,67 +1,66 @@
 "use client";
 
-import { ArrowDown, ArrowRight, ArrowUp, FlaskConical, Play, RotateCcw, Sunrise, Flame } from "lucide-react";
+import { ArrowDown, ArrowRight, ArrowUp, Flame, FlaskConical, Play, RotateCcw, Sun, Sunrise } from "lucide-react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { Suspense, useState } from "react";
-import { Button, Card, PageHeader, RiskBadge, ScoreRing, Segmented, SimulatedTag, Toggle, Banner } from "@/components/ui";
+import { WhyRiskIncreased } from "@/components/risk-explainer";
+import { Banner, Button, Card, PageHeader, RiskBadge, ScoreRing, Segmented, SimulatedTag } from "@/components/ui";
 import { AlertCard } from "@/components/workflow";
-import { HERO_WORKER_ID } from "@/lib/demo-data";
+import { HERO_TASK_ID } from "@/lib/demo-data";
 import { LEVEL_STYLE, cx } from "@/lib/format";
-import { assessRisk, levelRank, type RiskResult } from "@/lib/risk-engine";
-import { useDemo, type ReadingPatch } from "@/lib/store";
-import type { ActivityLevel, Alert, PpeLevel, ShadeAvailability } from "@/lib/types";
+import { RECOMMENDATION_LABEL, actionSummary, assessRisk, clockLabel, levelRank, recommendedActions, type RiskInputs, type RiskResult } from "@/lib/risk-engine";
+import { useDemo } from "@/lib/store";
+import type { Alert } from "@/lib/types";
 
 export default function DemoPage() {
   return (
     <Suspense>
-      <DemoInner />
+      <SimulatorPage />
     </Suspense>
   );
 }
 
-interface Draft {
-  temperature: number;
-  humidity: number;
-  heart_rate: number;
-  hrAvailable: boolean;
-  exposure_minutes: number;
-  activity_level: ActivityLevel;
-  ppe_level: PpeLevel;
-  shade_available: ShadeAvailability;
-}
+type Draft = RiskInputs;
 
 const PRESETS: { id: string; label: string; icon: typeof Sunrise; hint: string; draft: Draft }[] = [
   {
     id: "morning",
     label: "Morning baseline",
     icon: Sunrise,
-    hint: "10:00 · 31°C · 55% · 45 min",
-    draft: { temperature: 31, humidity: 55, heart_rate: 108, hrAvailable: true, exposure_minutes: 45, activity_level: "Heavy", ppe_level: "High", shade_available: "Limited" },
+    hint: "10:00 · 31°C · 55% · wind 12 · 45 min",
+    draft: { temperature: 31, humidity: 55, wind_kmh: 12, solar: "Moderate", hour: 10, intensity: "Heavy", exposure_minutes: 45, ppe: "Standard", shade: "Limited", cooling: "Available" },
   },
   {
     id: "peak",
-    label: "Peak heat (hero scenario)",
+    label: "Peak heat (Roof Zone)",
+    icon: Sun,
+    hint: "14:30 · 35°C · 68% · wind 8 · 82 min",
+    draft: { temperature: 35, humidity: 68, wind_kmh: 8, solar: "High", hour: 14.5, intensity: "Heavy", exposure_minutes: 82, ppe: "Standard", shade: "Limited", cooling: "Available" },
+  },
+  {
+    id: "heatwave",
+    label: "Heatwave afternoon",
     icon: Flame,
-    hint: "14:30 · 35°C · 68% · 82 min",
-    draft: { temperature: 35, humidity: 68, heart_rate: 128, hrAvailable: true, exposure_minutes: 82, activity_level: "Heavy", ppe_level: "High", shade_available: "Limited" },
+    hint: "15:00 · 39°C · 45% · wind 3 · 110 min",
+    draft: { temperature: 39, humidity: 45, wind_kmh: 3, solar: "High", hour: 15, intensity: "Heavy", exposure_minutes: 110, ppe: "Standard", shade: "Limited", cooling: "Limited" },
   },
 ];
 
-function DemoInner() {
+function SimulatorPage() {
   const params = useSearchParams();
   const { state, resetDemo } = useDemo();
-  const [workerId, setWorkerId] = useState(params.get("worker") ?? HERO_WORKER_ID);
+  const [taskId, setTaskId] = useState(params.get("task") ?? HERO_TASK_ID);
   const [resetKey, setResetKey] = useState(0);
-  const site = state.workers.find((w) => w.id === workerId)?.site_id;
+  const site = state.tasks.find((t) => t.id === taskId)?.site_id;
 
   return (
     <div>
       <PageHeader
-        title="Demo Mode"
+        title="Risk Simulator"
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            Simulate changing conditions — no wearable hardware required. <SimulatedTag />
+            Change environmental and operational inputs and see how task risk responds. <SimulatedTag>Demo data</SimulatedTag>
           </span>
         }
         actions={
@@ -70,7 +69,7 @@ function DemoInner() {
             icon={RotateCcw}
             onClick={() => {
               resetDemo();
-              setWorkerId(HERO_WORKER_ID);
+              setTaskId(HERO_TASK_ID);
               setResetKey((k) => k + 1);
             }}
           >
@@ -79,87 +78,79 @@ function DemoInner() {
         }
       />
       <div className="mb-5 flex flex-col gap-2 sm:flex-row sm:items-center">
-        <label className="text-sm text-ink-2">Worker</label>
-        <select
-          value={workerId}
-          onChange={(e) => setWorkerId(e.target.value)}
-          className="rounded-xl border border-line bg-white px-3 py-2 text-sm sm:w-80"
-        >
+        <label className="text-sm text-ink-2">Task type</label>
+        <select value={taskId} onChange={(e) => setTaskId(e.target.value)} className="rounded-xl border border-line bg-white px-3 py-2 text-sm sm:w-96">
           {state.sites.map((s) => (
             <optgroup key={s.id} label={s.name}>
-              {state.workers
-                .filter((w) => w.site_id === s.id)
-                .map((w) => (
-                  <option key={w.id} value={w.id}>
-                    {w.name} — {w.task}
+              {state.tasks
+                .filter((t) => t.site_id === s.id)
+                .map((t) => (
+                  <option key={t.id} value={t.id}>
+                    {t.name} — {state.zones.find((z) => z.id === t.zone_id)?.name}
                   </option>
                 ))}
             </optgroup>
           ))}
         </select>
-        {site && site !== state.currentSiteId && <span className="text-xs text-ink-3">Worker is on another site — switch site to see them on the dashboard.</span>}
+        {site && site !== state.currentSiteId && <span className="text-xs text-ink-3">Task is on another site — switch site to see it on the dashboard.</span>}
       </div>
-      <Simulator key={`${workerId}-${resetKey}`} workerId={workerId} />
+      <Simulator key={`${taskId}-${resetKey}`} taskId={taskId} />
     </div>
   );
 }
 
-function Simulator({ workerId }: { workerId: string }) {
+function Simulator({ taskId }: { taskId: string }) {
   const { state, assess, simulate } = useDemo();
-  const worker = state.workers.find((w) => w.id === workerId)!;
-  const rd = state.readings[workerId];
+  const task = state.tasks.find((t) => t.id === taskId)!;
+  const zone = state.zones.find((z) => z.id === task.zone_id)!;
   const [draft, setDraft] = useState<Draft>({
-    temperature: rd.temperature,
-    humidity: rd.humidity,
-    heart_rate: rd.heart_rate ?? worker.baseline_heart_rate + 10,
-    hrAvailable: rd.heart_rate != null,
-    exposure_minutes: rd.exposure_minutes,
-    activity_level: rd.activity_level,
-    ppe_level: rd.ppe_level,
-    shade_available: rd.shade_available,
+    temperature: zone.temperature,
+    humidity: zone.humidity,
+    wind_kmh: zone.wind_kmh,
+    solar: zone.solar,
+    hour: task.scenario_hour,
+    intensity: task.intensity,
+    exposure_minutes: task.exposure_minutes,
+    ppe: task.ppe,
+    shade: task.shade,
+    cooling: task.cooling,
   });
   const [result, setResult] = useState<{ before: RiskResult; after: RiskResult; alert?: Alert } | null>(null);
   const [running, setRunning] = useState(false);
 
-  const current = assess(workerId);
-  const preview = assessRisk(
-    { ...rd, ...draft, heart_rate: draft.hrAvailable && state.wearablesEnabled ? draft.heart_rate : null, baseline_heart_rate: worker.baseline_heart_rate },
-    state.thresholds,
-  );
+  const current = assess(taskId);
+  const preview = assessRisk(draft, state.thresholds);
   const set = <K extends keyof Draft>(k: K, v: Draft[K]) => setDraft((d) => ({ ...d, [k]: v }));
 
   const run = () => {
     setRunning(true);
     setResult(null);
-    const patch: ReadingPatch = {
-      temperature: draft.temperature,
-      humidity: draft.humidity,
-      heart_rate: draft.hrAvailable ? draft.heart_rate : null,
-      exposure_minutes: draft.exposure_minutes,
-      activity_level: draft.activity_level,
-      ppe_level: draft.ppe_level,
-      shade_available: draft.shade_available,
-    };
     // Short, real delay so the transition reads as an event; always resolves.
     setTimeout(() => {
-      setResult(simulate(workerId, patch));
+      setResult(
+        simulate(taskId, {
+          zone: { temperature: draft.temperature, humidity: draft.humidity, wind_kmh: draft.wind_kmh, solar: draft.solar },
+          task: { scenario_hour: draft.hour, intensity: draft.intensity, exposure_minutes: draft.exposure_minutes, ppe: draft.ppe, shade: draft.shade, cooling: draft.cooling },
+        }),
+      );
       setRunning(false);
     }, 450);
   };
 
   const liveAlert = result?.alert && state.alerts.find((a) => a.id === result.alert!.id && a.status === "active");
+  const recs = recommendedActions(preview.level, preview.factors);
 
   return (
     <div className="grid gap-4 lg:grid-cols-5">
       <Card className="p-6 lg:col-span-3">
-        <div className="mb-5 grid gap-2 sm:grid-cols-2">
+        <div className="mb-5 grid gap-2 sm:grid-cols-3">
           {PRESETS.map((p) => (
             <button
               key={p.id}
               onClick={() => setDraft(p.draft)}
               className="flex items-center gap-3 rounded-xl border border-line px-3.5 py-2.5 text-left transition-colors hover:border-ink-3"
             >
-              <p.icon className="h-4 w-4 text-ink-2" />
+              <p.icon className="h-4 w-4 shrink-0 text-ink-2" />
               <span>
                 <span className="block text-sm font-medium">{p.label}</span>
                 <span className="block text-xs text-ink-3">{p.hint}</span>
@@ -168,34 +159,32 @@ function Simulator({ workerId }: { workerId: string }) {
           ))}
         </div>
 
-        <div className="space-y-5">
-          <Slider label="Temperature" unit="°C" min={20} max={45} value={draft.temperature} onChange={(v) => set("temperature", v)} />
-          <Slider label="Humidity" unit="%" min={10} max={100} value={draft.humidity} onChange={(v) => set("humidity", v)} />
-          <div>
-            <Slider
-              label={`Heart rate (baseline ${worker.baseline_heart_rate} bpm)`}
-              unit=" bpm"
-              min={60}
-              max={180}
-              value={draft.heart_rate}
-              disabled={!draft.hrAvailable}
-              onChange={(v) => set("heart_rate", v)}
-            />
-            <div className="mt-2 flex items-center gap-2 text-xs text-ink-2">
-              <Toggle checked={draft.hrAvailable} onChange={(v) => set("hrAvailable", v)} label="Heart-rate sensor available" />
-              Wearable heart-rate sensor {draft.hrAvailable ? "reporting" : "unavailable (simulate missing data)"}
-            </div>
-          </div>
+        <p className="text-xs font-medium tracking-wide text-ink-3 uppercase">Environmental inputs · {zone.name} sensor</p>
+        <div className="mt-3 space-y-5">
+          <Slider label="Air temperature" unit="°C" min={20} max={45} value={draft.temperature} onChange={(v) => set("temperature", v)} />
+          <Slider label="Relative humidity" unit="%" min={10} max={100} value={draft.humidity} onChange={(v) => set("humidity", v)} />
+          <Slider label="Wind speed" unit=" km/h" min={0} max={40} value={draft.wind_kmh} onChange={(v) => set("wind_kmh", v)} />
+          <Slider label="Time of day" min={6} max={20} step={0.5} value={draft.hour} display={clockLabel(draft.hour)} onChange={(v) => set("hour", v)} />
+          <Field label="Solar exposure">
+            <Segmented value={draft.solar} options={["Low", "Moderate", "High"]} onChange={(v) => set("solar", v)} />
+          </Field>
+        </div>
+
+        <p className="mt-7 text-xs font-medium tracking-wide text-ink-3 uppercase">Operational inputs · supervisor & site configuration</p>
+        <div className="mt-3 space-y-5">
           <Slider label="Exposure duration" unit=" min" min={0} max={180} value={draft.exposure_minutes} onChange={(v) => set("exposure_minutes", v)} />
-          <div className="grid gap-4 sm:grid-cols-3">
-            <Field label="Activity intensity">
-              <Segmented value={draft.activity_level} options={["Low", "Moderate", "Heavy"]} onChange={(v) => set("activity_level", v)} />
+          <div className="grid gap-4 sm:grid-cols-2">
+            <Field label="Work intensity">
+              <Segmented value={draft.intensity} options={["Low", "Moderate", "Heavy"]} onChange={(v) => set("intensity", v)} />
             </Field>
-            <Field label="PPE">
-              <Segmented value={draft.ppe_level} options={["Low", "Medium", "High"]} onChange={(v) => set("ppe_level", v)} />
+            <Field label="PPE / clothing category">
+              <Segmented value={draft.ppe} options={["Light", "Standard", "Heavy"]} onChange={(v) => set("ppe", v)} />
             </Field>
             <Field label="Shade availability">
-              <Segmented value={draft.shade_available} options={["Good", "Limited", "None"]} onChange={(v) => set("shade_available", v)} />
+              <Segmented value={draft.shade} options={["Good", "Limited", "None"]} onChange={(v) => set("shade", v)} />
+            </Field>
+            <Field label="Cooling / rest area">
+              <Segmented value={draft.cooling} options={["Available", "Limited", "None"]} onChange={(v) => set("cooling", v)} />
             </Field>
           </div>
         </div>
@@ -203,27 +192,42 @@ function Simulator({ workerId }: { workerId: string }) {
         <Button onClick={run} disabled={running} icon={Play} className="mt-6 w-full py-3">
           {running ? "Running simulation…" : "Run heat-risk simulation"}
         </Button>
-        {!state.wearablesEnabled && (
-          <div className="mt-3">
-            <Banner tone="info">Wearable data is disabled in Settings — heart rate is excluded from all assessments.</Banner>
-          </div>
-        )}
+        <p className="mt-3 text-center text-[11px] text-ink-3">Demo risk model — thresholds require occupational-health validation before real deployment.</p>
       </Card>
 
       <div className="space-y-4 lg:col-span-2">
         <Card className="p-6">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-ink-2">{worker.name}</p>
-              <p className="text-xs text-ink-3">{worker.task}</p>
+              <p className="text-sm text-ink-2">{task.name}</p>
+              <p className="text-xs text-ink-3">
+                {zone.name} · {task.team}
+              </p>
             </div>
             <span className="text-xs text-ink-3">Live on dashboard: {current.score}</span>
           </div>
           <div className="my-5 flex flex-col items-center">
             <ScoreRing score={preview.score} level={preview.level} size={150} />
-            <p className={cx("mt-3 text-2xl font-semibold tracking-tight", LEVEL_STYLE[preview.level].fg)}>{preview.level}</p>
+            <p className={cx("mt-3 text-2xl font-semibold tracking-tight", LEVEL_STYLE[preview.level].fg)}>{LEVEL_STYLE[preview.level].label} heat risk</p>
             <p className="text-xs text-ink-3">Preview — run the simulation to apply</p>
           </div>
+          <p className="text-xs font-medium text-ink-2">Explanation</p>
+          <div className="mt-2">
+            <WhyRiskIncreased risk={preview} />
+          </div>
+          <p className="mt-4 text-xs font-medium text-ink-2">Recommended intervention</p>
+          {recs.length > 1 ? (
+            <ul className="mt-1.5 space-y-1 text-sm">
+              {recs.map((r) => (
+                <li key={r} className="flex items-center gap-2">
+                  <span className="h-1 w-1 rounded-full bg-ink-2" />
+                  {RECOMMENDATION_LABEL[r]}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            <p className="mt-1.5 text-sm text-ink-2">{actionSummary(preview)}</p>
+          )}
         </Card>
 
         {running && <div className="skeleton h-40" />}
@@ -252,8 +256,8 @@ function Simulator({ workerId }: { workerId: string }) {
             </p>
             <ol className="mt-2 list-decimal space-y-1 pl-5">
               <li>Load “Morning baseline” and run — Moderate.</li>
-              <li>Move temperature from 31°C → 35°C and run — risk increases to High.</li>
-              <li>Load “Peak heat” and run — Critical, alert raised.</li>
+              <li>Load “Peak heat” and run — High, alert raised for the Roof Zone.</li>
+              <li>Load “Heatwave afternoon” and run — Critical, with “Pause task” recommended.</li>
             </ol>
           </Card>
         )}
@@ -308,40 +312,33 @@ function TransitionCard({ before, after }: { before: RiskResult; after: RiskResu
 
 function Slider({
   label,
-  unit,
+  unit = "",
   min,
   max,
+  step = 1,
   value,
+  display,
   onChange,
-  disabled,
 }: {
   label: string;
-  unit: string;
+  unit?: string;
   min: number;
   max: number;
+  step?: number;
   value: number;
+  display?: string;
   onChange: (v: number) => void;
-  disabled?: boolean;
 }) {
   return (
-    <div className={cx(disabled && "opacity-40")}>
+    <div>
       <div className="flex items-baseline justify-between text-sm">
         <span className="text-ink-2">{label}</span>
         <span className="tabular text-base font-semibold">
-          {value}
-          {unit}
+          {display ?? value}
+          {display ? "" : unit}
         </span>
       </div>
-      <input
-        type="range"
-        min={min}
-        max={max}
-        value={value}
-        disabled={disabled}
-        onChange={(e) => onChange(Number(e.target.value))}
-        className="mt-2 w-full"
-        aria-label={label}
-      />
+      <input type="range" min={min} max={max} step={step} value={value} onChange={(e) => onChange(Number(e.target.value))} className="mt-2 w-full" aria-label={label} />
     </div>
   );
 }

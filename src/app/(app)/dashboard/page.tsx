@@ -1,14 +1,14 @@
 "use client";
 
-import { BellOff, CloudOff, Droplets, FlaskConical, HeartPulse, Sun, Thermometer, Users, Gauge, ShieldCheck } from "lucide-react";
+import { BellOff, CloudOff, Droplets, FlaskConical, Gauge, ShieldCheck, Sun, Thermometer, Wind } from "lucide-react";
 import Link from "next/link";
 import { useMemo, useRef, useState } from "react";
-import { WorkerTable } from "@/components/worker-table";
+import { TaskTable } from "@/components/task-table";
 import { AlertCard } from "@/components/workflow";
-import { Button, Card, EmptyState, PageHeader, RiskBadge, SimulatedTag, Banner } from "@/components/ui";
-import { LEVEL_STYLE, cx } from "@/lib/format";
-import { estimateWbgt, levelRank, siteLevel, SITE_WBGT_BANDS } from "@/lib/risk-engine";
-import { useDemo } from "@/lib/store";
+import { Banner, Button, Card, EmptyState, PageHeader, RiskBadge, SimulatedTag, SourceTag } from "@/components/ui";
+import { LEVEL_STYLE, cx, workLabel } from "@/lib/format";
+import { RECOMMENDATION_LABEL, estimateWbgt, levelRank, siteLevel, SITE_WBGT_BANDS } from "@/lib/risk-engine";
+import { siteSnapshot, useDemo } from "@/lib/store";
 import type { RiskLevel } from "@/lib/types";
 
 export default function Dashboard() {
@@ -17,36 +17,22 @@ export default function Dashboard() {
   const [filter, setFilter] = useState<"all" | "affected">("all");
   const tableRef = useRef<HTMLDivElement>(null);
 
-  const rows = useMemo(
-    () =>
-      state.workers
-        .filter((w) => w.site_id === site.id)
-        .map((worker) => ({ worker, risk: assess(worker.id) }))
-        .sort((a, b) => b.risk.score - a.risk.score),
-    [state, site.id, assess],
-  );
-  const counts = rows.reduce(
-    (acc, r) => ({ ...acc, [r.risk.level]: acc[r.risk.level] + 1 }),
-    { LOW: 0, MODERATE: 0, HIGH: 0, CRITICAL: 0 } as Record<RiskLevel, number>,
-  );
-  const siteIds = new Set(rows.map((r) => r.worker.id));
-  const alerts = state.alerts.filter((a) => a.status === "active" && siteIds.has(a.worker_id));
+  const snap = useMemo(() => siteSnapshot(state, site.id, assess), [state, site.id, assess]);
   const level = siteLevel(site.temperature, site.humidity);
   const wbgt = estimateWbgt(site.temperature, site.humidity);
-  const shown = filter === "affected" ? rows.filter((r) => levelRank(r.risk.level) >= 2) : rows;
-  const missingHr = rows.filter((r) => r.risk.heartRateMissing).length;
+  const shown = filter === "affected" ? snap.highRiskTasks : snap.tasks;
 
   const viewAffected = () => {
     setFilter("affected");
     tableRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
   };
 
-  const kpis: { label: string; value: number; level?: RiskLevel; icon?: typeof Users }[] = [
-    { label: "Workers monitored", value: rows.length, icon: Users },
-    { label: "Low risk", value: counts.LOW, level: "LOW" },
-    { label: "Moderate", value: counts.MODERATE, level: "MODERATE" },
-    { label: "High", value: counts.HIGH, level: "HIGH" },
-    { label: "Critical", value: counts.CRITICAL, level: "CRITICAL" },
+  const kpis: { label: string; value: number; tone?: "alert" | "good"; href?: string }[] = [
+    { label: "High-risk zones", value: snap.highRiskZones.length, tone: snap.highRiskZones.length ? "alert" : undefined, href: "#zones" },
+    { label: "High-risk tasks", value: snap.highRiskTasks.length, tone: snap.highRiskTasks.length ? "alert" : undefined },
+    { label: "Active alerts", value: snap.activeAlerts.length, tone: snap.activeAlerts.length ? "alert" : undefined, href: "#alerts" },
+    { label: "Recommended interventions", value: snap.recommended.length },
+    { label: "Confirmed interventions", value: snap.confirmedThisWeek, tone: "good" },
   ];
 
   return (
@@ -55,13 +41,13 @@ export default function Dashboard() {
         title={site.name}
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            {site.location} <SimulatedTag />
+            Site Safety Super Intelligence Dashboard · {site.location} <SimulatedTag>Demo data</SimulatedTag>
           </span>
         }
         actions={
           <Link href="/demo">
             <Button variant="secondary" icon={FlaskConical}>
-              Demo Mode
+              Risk Simulator
             </Button>
           </Link>
         }
@@ -69,72 +55,77 @@ export default function Dashboard() {
 
       {!site.weather_online && (
         <Banner tone="warn" icon={CloudOff}>
-          <b>Weather feed offline.</b> Showing the last environmental reading from {site.weather_last_update}. Worker risk uses the last known
+          <b>Weather feed offline.</b> Showing the last environmental reading from {site.weather_last_update}. Task risk uses the last known
           conditions until the feed reconnects.
         </Banner>
       )}
 
       {/* KPI row */}
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
-        {kpis.map((k) => (
-          <Card key={k.label} className="p-4">
-            <div className="flex items-center gap-1.5 text-xs text-ink-2">
-              {k.level ? <span className={cx("h-2 w-2 rounded-full", LEVEL_STYLE[k.level].dot)} /> : k.icon && <k.icon className="h-3.5 w-3.5" />}
-              {k.label}
-            </div>
-            <p className={cx("tabular mt-2 text-3xl font-semibold tracking-tight", k.level === "CRITICAL" && k.value > 0 && "text-critical")}>{k.value}</p>
-          </Card>
-        ))}
-        <a href="#alerts" className="block">
-          <Card className={cx("h-full p-4 transition-colors", alerts.length > 0 ? "border-critical/30 bg-critical-bg/50" : "")}>
-            <div className="text-xs text-ink-2">Active alerts</div>
-            <p className={cx("tabular mt-2 text-3xl font-semibold tracking-tight", alerts.length > 0 && "text-critical")}>{alerts.length}</p>
-          </Card>
-        </a>
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        {kpis.map((k) => {
+          const card = (
+            <Card className={cx("h-full p-4 transition-colors", k.tone === "alert" && "border-high/30 bg-high-bg/40")}>
+              <div className="text-xs text-ink-2">{k.label}</div>
+              <p className={cx("tabular mt-2 text-3xl font-semibold tracking-tight", k.tone === "alert" && "text-high", k.tone === "good" && "text-low")}>{k.value}</p>
+              {k.label === "Confirmed interventions" && <p className="text-[11px] text-ink-3">Last 7 days</p>}
+            </Card>
+          );
+          return k.href ? (
+            <a key={k.label} href={k.href} className="block">
+              {card}
+            </a>
+          ) : (
+            <div key={k.label}>{card}</div>
+          );
+        })}
       </div>
 
       <div className="grid gap-4 lg:grid-cols-5">
-        {/* Site heat risk */}
+        {/* Overall site risk */}
         <Card className="p-6 sm:p-7 lg:col-span-3">
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-medium text-ink-2">Site Heat Risk</p>
-              <p className={cx("mt-1 text-5xl font-semibold tracking-tight sm:text-6xl", LEVEL_STYLE[level].fg)}>{level}</p>
+              <p className="text-sm font-medium text-ink-2">Overall Site Risk</p>
+              <p className={cx("mt-1 text-5xl font-semibold tracking-tight sm:text-6xl", LEVEL_STYLE[level].fg)}>{LEVEL_STYLE[level].label}</p>
             </div>
             <RiskBadge level={level} size="md" />
           </div>
 
           <WbgtScale wbgt={wbgt} />
 
-          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3">
             {[
-              { icon: Thermometer, label: "Temperature", value: `${site.temperature}°C` },
-              { icon: Droplets, label: "Humidity", value: `${site.humidity}%` },
-              { icon: Gauge, label: "Heat indicator / WBGT", value: `${wbgt}°C` },
-              { icon: Sun, label: "Solar exposure", value: site.solar },
-            ].map(({ icon: Icon, label, value }) => (
+              { icon: Thermometer, label: "Temperature", value: `${site.temperature}°C`, source: "Environmental sensor" },
+              { icon: Droplets, label: "Humidity", value: `${site.humidity}%`, source: "Environmental sensor" },
+              { icon: Wind, label: "Wind", value: `${site.wind_kmh} km/h`, source: "Environmental sensor" },
+              { icon: Sun, label: "Solar exposure", value: site.solar, source: "Environmental sensor" },
+              { icon: Gauge, label: "WBGT", value: `${wbgt}°C`, source: "Calculated" },
+            ].map(({ icon: Icon, label, value, source }) => (
               <div key={label} className="rounded-xl bg-line-2/60 p-3">
                 <div className="flex items-center gap-1.5 text-xs text-ink-2">
                   <Icon className="h-3.5 w-3.5" /> {label}
                 </div>
                 <p className="tabular mt-1 text-xl font-semibold">{value}</p>
+                <SourceTag source={source} />
               </div>
             ))}
           </div>
 
           <div className="mt-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-ink-2">
-              {levelRank(level) >= 2
-                ? "Conditions are currently elevated. Review workers at high or critical risk."
-                : levelRank(level) === 1
+              {snap.highRiskZones.length
+                ? `Elevated heat risk in ${snap.highRiskZones.map((z) => z.zone.name).join(" and ")}. Review the affected tasks and confirm interventions.`
+                : levelRank(level) >= 1
                   ? "Conditions are warm. Keep hydration reminders active and monitor heavy tasks."
                   : "Conditions are within normal range. Continue routine monitoring."}
             </p>
             <Button onClick={viewAffected} className="shrink-0">
-              View affected workers
+              View high-risk tasks
             </Button>
           </div>
-          <p className="mt-4 text-[11px] text-ink-3">WBGT is a simplified estimate from temperature and humidity for this prototype.</p>
+          <p className="mt-4 text-[11px] text-ink-3">
+            Weather station {site.weather_station} · WBGT is calculated from temperature and humidity for this prototype.
+          </p>
         </Card>
 
         {/* Alerts */}
@@ -143,25 +134,72 @@ export default function Dashboard() {
             <h2 className="font-semibold">Active alerts</h2>
             <span className="text-xs text-ink-3">Supervisor confirmation required</span>
           </div>
-          {alerts.length === 0 ? (
+          {snap.activeAlerts.length === 0 ? (
             <Card>
-              <EmptyState icon={BellOff} title="No active alerts" body="All high-risk events on this site have been actioned. New alerts appear here when a worker reaches High or Critical." />
+              <EmptyState icon={BellOff} title="No active alerts" body="All high-risk events on this site have been actioned. New alerts appear here when a task reaches High or Critical." />
             </Card>
           ) : (
-            alerts
-              .sort((a, b) => levelRank(b.severity) - levelRank(a.severity))
-              .map((a) => <AlertCard key={a.id} alert={a} />)
+            [...snap.activeAlerts].sort((a, b) => levelRank(b.severity) - levelRank(a.severity)).map((a) => <AlertCard key={a.id} alert={a} />)
+          )}
+          {snap.recommended.length > 0 && (
+            <Card className="p-4">
+              <p className="text-xs font-medium tracking-wide text-ink-3 uppercase">Recommended interventions</p>
+              <ul className="mt-2 grid gap-1 text-sm sm:grid-cols-2 lg:grid-cols-1">
+                {snap.recommended.map((r) => (
+                  <li key={r} className="flex items-center gap-2">
+                    <span className="h-1 w-1 rounded-full bg-ink-2" />
+                    {RECOMMENDATION_LABEL[r]}
+                  </li>
+                ))}
+              </ul>
+            </Card>
           )}
         </div>
       </div>
 
-      {/* Worker table */}
+      {/* Zones */}
+      <section id="zones" className="scroll-mt-20">
+        <div className="mb-3 flex items-center justify-between px-1">
+          <h2 className="font-semibold">Zones</h2>
+          <span className="text-xs text-ink-3">Each zone reports from its own environmental sensor</span>
+        </div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+          {snap.zones.map(({ zone, tasks, level: zl, top }) => (
+            <Card key={zone.id} className={cx("p-5", levelRank(zl) >= 2 && "border-high/30")}>
+              <div className="flex items-start justify-between gap-2">
+                <div>
+                  <p className="font-semibold">{zone.name}</p>
+                  <p className="text-xs text-ink-3">
+                    {zone.setting} · sensor {zone.sensor_id}
+                  </p>
+                </div>
+                <RiskBadge level={zl} />
+              </div>
+              <p className="tabular mt-3 text-sm text-ink-2">
+                {zone.temperature}°C · {zone.humidity}% · {zone.wind_kmh} km/h · WBGT {estimateWbgt(zone.temperature, zone.humidity)}°C
+              </p>
+              {top && (
+                <Link href={`/tasks/${top.task.id}`} className="mt-3 block rounded-xl bg-line-2/60 px-3 py-2 text-sm hover:bg-line-2">
+                  <span className="font-medium">{top.task.name}</span>
+                  <span className="text-ink-2">
+                    {" "}
+                    · {workLabel(top.task.intensity)} · {top.task.exposure_minutes} min exposure
+                  </span>
+                  {tasks.length > 1 && <span className="block text-xs text-ink-3">+{tasks.length - 1} more task{tasks.length > 2 ? "s" : ""}</span>}
+                </Link>
+              )}
+            </Card>
+          ))}
+        </div>
+      </section>
+
+      {/* Task table */}
       <div ref={tableRef} className="scroll-mt-20">
         <Card className="overflow-hidden">
           <div className="flex flex-col gap-3 border-b border-line px-5 py-4 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h2 className="font-semibold">Worker risk</h2>
-              <p className="text-xs text-ink-3">Sorted by risk score · tap a worker for the full assessment</p>
+              <h2 className="font-semibold">Task risk</h2>
+              <p className="text-xs text-ink-3">Sorted by risk score · open a task for the full assessment</p>
             </div>
             <div className="inline-flex rounded-xl bg-line-2 p-1 text-sm">
               {(["all", "affected"] as const).map((f) => (
@@ -170,19 +208,12 @@ export default function Dashboard() {
                   onClick={() => setFilter(f)}
                   className={cx("rounded-lg px-3 py-1 font-medium", filter === f ? "bg-white shadow-sm" : "text-ink-2")}
                 >
-                  {f === "all" ? `All (${rows.length})` : `High & critical (${counts.HIGH + counts.CRITICAL})`}
+                  {f === "all" ? `All (${snap.tasks.length})` : `High & critical (${snap.highRiskTasks.length})`}
                 </button>
               ))}
             </div>
           </div>
-          {missingHr > 0 && (
-            <div className="border-b border-line-2 px-5 py-2.5 text-xs text-ink-2">
-              <HeartPulse className="mr-1 inline h-3.5 w-3.5" />
-              Heart-rate data unavailable for {missingHr} worker{missingHr > 1 ? "s" : ""}. Their risk assessment is based on environmental and activity
-              signals.
-            </div>
-          )}
-          <WorkerTable rows={shown} />
+          <TaskTable rows={shown} />
         </Card>
       </div>
 
@@ -224,10 +255,10 @@ function WbgtScale({ wbgt }: { wbgt: number }) {
 
 function TrustStrip() {
   const items = [
-    "Designed for safety management — not productivity surveillance",
-    "Wearable data is optional; personal data minimised",
-    "Every alert requires human supervisor confirmation or override",
-    "Missing sensor data is shown explicitly, never inferred",
+    "Site-first: built only on measurable environmental and operational data",
+    "No physiological, wearable or medical data is collected or inferred",
+    "Every alert requires supervisor confirmation, escalation or a logged override",
+    "Missing sensor data is shown explicitly, never filled in",
   ];
   return (
     <Card className="p-5">

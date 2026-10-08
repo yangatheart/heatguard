@@ -31,3 +31,6 @@ export const LEVEL_STYLE: Record<RiskLevel, { label: string; fg: string; bg: str
 };
 
 export const cx = (...c: (string | false | null | undefined)[]) => c.filter(Boolean).join(" ");
+
+/** "Heavy work", "Moderate work", "Light work" — how work intensity reads in sentences. */
+export const workLabel = (intensity: string) => `${intensity === "Low" ? "Light" : intensity} work`;

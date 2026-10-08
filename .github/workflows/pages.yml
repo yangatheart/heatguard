@@ -1,8 +1,10 @@
-name: Deploy to GitHub Pages
+name: Deploy SiteSafe SI to GitHub Pages
 
 on:
   push:
     branches: [main]
+    # Docs and the target database schema don't change the site.
+    paths-ignore: ["**.md", "supabase/**"]
   workflow_dispatch:
 
 permissions:
@@ -16,6 +18,7 @@ concurrency:
 
 jobs:
   build:
+    name: Build static site (SiteSafe SI)
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -23,19 +26,33 @@ jobs:
         with:
           node-version: 22
           cache: npm
+      - id: pages
+        uses: actions/configure-pages@v5
       - run: npm ci
       # Static hosting has no server: drop the API route; the report page falls back
       # to the in-browser rule-based summary (see next.config.ts).
       - run: rm -rf src/app/api
-      - run: npm run build
+      - name: Build
+        run: npm run build
         env:
           GITHUB_PAGES: "true"
+          # Follows the repository name, e.g. /sitesafe-si.
+          PAGES_BASE_PATH: ${{ steps.pages.outputs.base_path }}
+      - name: Check export
+        run: |
+          for f in out/index.html out/dashboard/index.html out/tasks/t_mad_roof/index.html; do
+            test -f "$f" || { echo "::error::Missing $f"; exit 1; }
+          done
+          grep -q "SiteSafe SI" out/index.html || { echo "::error::Product name missing from out/index.html"; exit 1; }
+          # Guard the rename and the no-physiological-data rule.
+          if grep -rIlw -e "HeatGuard" -e "bpm" out; then echo "::error::Old product name or physiological units found in export"; exit 1; fi
       - run: touch out/.nojekyll
       - uses: actions/upload-pages-artifact@v3
         with:
           path: out
 
   deploy:
+    name: Deploy
     needs: build
     runs-on: ubuntu-latest
     environment:
@@ -44,3 +61,8 @@ jobs:
     steps:
       - id: deployment
         uses: actions/deploy-pages@v4
+      - name: Smoke test
+        run: |
+          for path in "" "dashboard/"; do
+            curl -fsS -o /dev/null --retry 6 --retry-delay 10 --retry-all-errors "${{ steps.deployment.outputs.page_url }}$path"
+          done

@@ -51,10 +51,10 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="Alert preferences">
-        <Row label="Worker alerts" desc="Haptic prompt on the worker's wearable to hydrate or rest">
-          <Toggle label="Worker alerts" checked={ap.workerAlerts} onChange={(v) => updateSettings({ alertPrefs: { ...ap, workerAlerts: v } })} />
+        <Row label="Team-lead alerts" desc="Notify the team lead of the affected task to start hydration and rest breaks">
+          <Toggle label="Team-lead alerts" checked={ap.teamLeadAlerts} onChange={(v) => updateSettings({ alertPrefs: { ...ap, teamLeadAlerts: v } })} />
         </Row>
-        <Row label="Supervisor alerts" desc="Push + dashboard alert when a worker reaches High or Critical">
+        <Row label="Supervisor alerts" desc="Push + dashboard alert when a task reaches High or Critical">
           <Toggle label="Supervisor alerts" checked={ap.supervisorAlerts} onChange={(v) => updateSettings({ alertPrefs: { ...ap, supervisorAlerts: v } })} />
         </Row>
         <Row label="Escalation" desc={`Escalate to safety manager if not confirmed within ${ap.escalationMinutes} min`}>
@@ -66,7 +66,7 @@ export default function SettingsPage() {
       </Section>
 
       <Section title="Site safety configuration">
-        <Row label="Cooling area" desc="Where workers are sent for recovery breaks">
+        <Row label="Cooling / rest area" desc="Where teams take configured cooling and rest breaks">
           <input
             value={sc.coolingArea}
             onChange={(e) => updateSettings({ siteConfig: { ...sc, coolingArea: e.target.value } })}
@@ -76,10 +76,10 @@ export default function SettingsPage() {
         <Row label="Hydration availability" desc="Drinking water stations on site">
           <Toggle label="Hydration availability" checked={sc.hydrationAvailable} onChange={(v) => updateSettings({ siteConfig: { ...sc, hydrationAvailable: v } })} />
         </Row>
-        <Row label="Break duration" desc="Configured recovery break">
+        <Row label="Break duration" desc="Configured cooling/rest break">
           <NumberInput value={sc.breakMinutes} min={5} max={60} unit="min" onChange={(v) => updateSettings({ siteConfig: { ...sc, breakMinutes: v } })} />
         </Row>
-        <Row label="Maximum continuous exposure" desc="Prompt a break after this many minutes in direct heat">
+        <Row label="Maximum continuous exposure" desc="Prompt a break after this many minutes of tracked task exposure">
           <NumberInput value={sc.maxContinuousExposure} min={15} max={180} unit="min" onChange={(v) => updateSettings({ siteConfig: { ...sc, maxContinuousExposure: v } })} />
         </Row>
       </Section>
@@ -87,19 +87,18 @@ export default function SettingsPage() {
       <Section title="Privacy">
         <div className="flex gap-3 rounded-xl bg-low-bg/70 p-4">
           <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-low" />
-          <p className="text-sm font-medium">HeatGuard is designed for safety management, not punitive productivity surveillance.</p>
+          <p className="text-sm font-medium">
+            SiteSafe SI is a site safety intelligence platform. It assesses site, zone and task conditions — it does not monitor workers&apos; health.
+          </p>
         </div>
-        <Row label="Use wearable data" desc="Wearable data is optional. When off, risk is assessed from environmental and activity signals only.">
-          <Toggle label="Use wearable data" checked={state.wearablesEnabled} onChange={(v) => updateSettings({ wearablesEnabled: v })} />
-        </Row>
-        <ul className="mt-2 grid gap-2 text-sm text-ink-2 sm:grid-cols-2">
+        <ul className="mt-4 grid gap-2 text-sm text-ink-2 sm:grid-cols-2">
           {[
-            "Personal data minimised to name, role, site and heat-risk signals",
-            "Worker consent captured where required before pairing a wearable",
+            "No heart rate, body temperature, wearable or other physiological data",
+            "No medical or personal health information is collected or inferred",
+            "Worker records limited to name, role and team assignment",
             "Supervisors can override any assessment; overrides are logged",
-            "Simulated and missing data are always labelled",
-            "All alerts, interventions and overrides are written to the audit log",
-            "No productivity or location-tracking metrics are collected",
+            "Demo and missing data are always labelled",
+            "No productivity or individual location-tracking metrics are collected",
           ].map((i) => (
             <li key={i} className="flex gap-2">
               <Lock className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-3" />

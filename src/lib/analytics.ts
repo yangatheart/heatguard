@@ -1,10 +1,11 @@
 import type { DemoState } from "./store";
-import type { RiskLevel } from "./types";
+import type { RiskLevel, SolarExposure } from "./types";
 
 export interface Analytics {
   weekly: { day: string; events: number }[];
   byHour: { hour: string; events: number }[];
-  byTask: { task: string; events: number; workers: number }[];
+  byTask: { task: string; events: number }[];
+  byZone: { zone: string; events: number }[];
   alerts: number;
   confirmed: number;
   resolved: number;
@@ -28,6 +29,12 @@ export function peakWindow(hours: number[]): string | null {
   return `${p(start)}–${p(start + 3)}`;
 }
 
+const countBy = (keys: string[]) => {
+  const m = new Map<string, number>();
+  for (const k of keys) m.set(k, (m.get(k) ?? 0) + 1);
+  return m;
+};
+
 export function computeAnalytics(state: DemoState): Analytics {
   const alerts = state.alerts;
   const today = new Date();
@@ -44,20 +51,22 @@ export function computeAnalytics(state: DemoState): Analytics {
   const hours = alerts.map((a) => new Date(a.created_at).getHours());
   const byHour = HOURS.map((h) => ({ hour: `${String(h).padStart(2, "0")}:00`, events: hours.filter((x) => x === h).length }));
 
-  // High/critical events per task this week; tasks with no events stay visible as a baseline.
-  const workersPerTask = new Map<string, number>();
-  for (const w of state.workers) workersPerTask.set(w.task, (workersPerTask.get(w.task) ?? 0) + 1);
-  const eventsPerTask = new Map<string, number>();
-  for (const a of alerts) eventsPerTask.set(a.snapshot.task, (eventsPerTask.get(a.snapshot.task) ?? 0) + 1);
-  const byTask = [...new Set([...eventsPerTask.keys(), ...workersPerTask.keys()])]
-    .map((task) => ({ task, events: eventsPerTask.get(task) ?? 0, workers: workersPerTask.get(task) ?? 0 }))
-    .sort((a, b) => b.events - a.events || b.workers - a.workers)
+  // High/critical events per task and per zone; tasks with no events stay visible as a baseline.
+  const perTask = countBy(alerts.map((a) => a.snapshot.task));
+  const byTask = [...new Set([...perTask.keys(), ...state.tasks.map((t) => t.name)])]
+    .map((task) => ({ task, events: perTask.get(task) ?? 0 }))
+    .sort((a, b) => b.events - a.events)
     .slice(0, 9);
+  const byZone = [...countBy(alerts.map((a) => a.snapshot.zone)).entries()]
+    .map(([zone, events]) => ({ zone, events }))
+    .sort((a, b) => b.events - a.events)
+    .slice(0, 6);
 
   return {
     weekly,
     byHour,
     byTask,
+    byZone,
     alerts: alerts.length,
     confirmed: alerts.filter((a) => a.status === "confirmed" || a.status === "resolved" || a.status === "escalated").length,
     resolved: alerts.filter((a) => a.status === "resolved").length,
@@ -69,13 +78,14 @@ export function computeAnalytics(state: DemoState): Analytics {
 export interface ReportFacts {
   date: string;
   site: string;
-  conditions: { temperature: number; humidity: number; wbgt: number; solar: string; weatherOnline: boolean };
-  workersMonitored: number;
-  currentByLevel: Record<RiskLevel, number>;
-  todaysEvents: { time: string; worker: string; task: string; level: RiskLevel; intervention: string | null; status: string }[];
+  conditions: { temperature: number; humidity: number; wbgt: number; windKmh: number; solar: SolarExposure; weatherOnline: boolean };
+  zonesMonitored: number;
+  tasksMonitored: number;
+  currentTasksByLevel: Record<RiskLevel, number>;
+  highRiskZones: string[];
+  todaysEvents: { time: string; zone: string; task: string; team: string; level: RiskLevel; trigger: string[]; intervention: string | null; status: string }[];
   peakWindowToday: string | null;
-  topFactors: { factor: string; workers: number }[];
-  heartRateUnavailable: number;
+  topFactors: { factor: string; tasks: number }[];
   openAlerts: number;
   configuredMaxExposureMinutes: number;
   configuredBreakMinutes: number;

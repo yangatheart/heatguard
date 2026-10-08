@@ -1,16 +1,16 @@
 "use client";
 
-import { ArrowRight, Bell, ClipboardCheck, Lock, ScrollText, Thermometer } from "lucide-react";
+import { ArrowRight, ClipboardCheck, Lock, Radar, ScrollText, Sparkles } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { Logo, SESSION_KEY } from "@/components/app-shell";
 import { Button, SimulatedTag } from "@/components/ui";
 
 const FLOW = [
-  { icon: Thermometer, label: "Heat-risk signal" },
-  { icon: Bell, label: "Actionable alert" },
-  { icon: ClipboardCheck, label: "Supervisor confirms" },
-  { icon: ScrollText, label: "Auditable record" },
+  { icon: Radar, label: "Sense", hint: "Site & environmental data" },
+  { icon: Sparkles, label: "Understand", hint: "Transparent risk assessment" },
+  { icon: ClipboardCheck, label: "Act", hint: "Supervisor-confirmed intervention" },
+  { icon: ScrollText, label: "Record", hint: "Auditable safety log" },
 ];
 
 export default function Login() {
@@ -27,16 +27,16 @@ export default function Login() {
   return (
     <div className="flex min-h-screen flex-col">
       <header className="mx-auto flex w-full max-w-6xl items-center justify-between px-6 py-6">
-        <Logo />
+        <Logo descriptor />
         <SimulatedTag>Investor & customer demo</SimulatedTag>
       </header>
 
       <main className="mx-auto flex w-full max-w-6xl flex-1 flex-col items-center justify-center px-6 pb-16 text-center">
         <h1 className="animate-fade-up max-w-3xl text-4xl leading-[1.08] font-semibold tracking-tight text-ink sm:text-6xl">
-          Protect workers before heat becomes an incident.
+          Turn site conditions into safety action.
         </h1>
         <p className="animate-fade-up mt-5 max-w-xl text-lg text-ink-2" style={{ animationDelay: "80ms" }}>
-          HeatGuard turns real-time heat-risk signals into actionable safety interventions and auditable site records.
+          SiteSafe SI turns measurable site conditions into actionable safety intelligence.
         </p>
 
         <div className="animate-fade-up mt-9 w-full max-w-sm rounded-3xl border border-line bg-white p-6 text-left shadow-[var(--shadow-pop)]" style={{ animationDelay: "160ms" }}>
@@ -53,11 +53,12 @@ export default function Login() {
         </div>
 
         <div className="animate-fade-up mt-12 flex flex-wrap items-center justify-center gap-2 text-sm text-ink-2" style={{ animationDelay: "240ms" }}>
-          {FLOW.map(({ icon: Icon, label }, i) => (
+          {FLOW.map(({ icon: Icon, label, hint }, i) => (
             <div key={label} className="flex items-center gap-2">
-              <span className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 ring-1 ring-line">
+              <span className="flex items-center gap-1.5 rounded-full bg-white px-3 py-1.5 ring-1 ring-line" title={hint}>
                 <Icon className="h-3.5 w-3.5" />
-                {label}
+                <span className="font-medium text-ink">{label}</span>
+                <span className="hidden text-ink-3 sm:inline">· {hint}</span>
               </span>
               {i < FLOW.length - 1 && <span className="text-ink-3">→</span>}
             </div>
@@ -66,7 +67,7 @@ export default function Login() {
       </main>
 
       <footer className="mx-auto w-full max-w-6xl px-6 pb-8 text-center text-xs text-ink-3">
-        Prototype using simulated worker and wearable data. Designed for safety management, not productivity surveillance.
+        Prototype using demo environmental and site data. A site safety intelligence platform — not a wearable, health-monitoring or medical system.
       </footer>
     </div>
   );

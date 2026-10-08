@@ -4,10 +4,11 @@ import { Download, Printer, ScrollText } from "lucide-react";
 import { useMemo, useState } from "react";
 import { Button, Card, EmptyState, PageHeader, RiskBadge, SimulatedTag } from "@/components/ui";
 import { dayLabel, hhmm, cx } from "@/lib/format";
+import { RECOMMENDATION_LABEL } from "@/lib/risk-engine";
 import { useDemo } from "@/lib/store";
 import type { RiskLevel, SafetyLogEntry } from "@/lib/types";
 
-const INTERVENTIONS = ["Cooling break", "Hydration", "Move to shade", "Work rotation", "Escalated", "Override"];
+const INTERVENTIONS = ["Hydration", "Cooling/rest break", "Move activity to shade", "Work rotation", "Pause task", "Escalated", "Override"];
 const STATUSES: SafetyLogEntry["resolution"][] = ["Resolved", "Monitoring", "Escalated", "Dismissed"];
 
 const STATUS_STYLE: Record<SafetyLogEntry["resolution"], string> = {
@@ -27,12 +28,12 @@ function matchesIntervention(e: SafetyLogEntry, f: string) {
 export default function SafetyLogPage() {
   const { state } = useDemo();
   const [range, setRange] = useState<"today" | "7d" | "all">("7d");
-  const [worker, setWorker] = useState("all");
+  const [zone, setZone] = useState("all");
   const [level, setLevel] = useState<RiskLevel | "all">("all");
   const [intervention, setIntervention] = useState("all");
   const [status, setStatus] = useState<string>("all");
 
-  const workers = useMemo(() => [...new Set(state.log.map((e) => e.worker_name))].sort(), [state.log]);
+  const zones = useMemo(() => [...new Set(state.log.map((e) => e.zone))].sort(), [state.log]);
   const siteName = (id: string) => state.sites.find((s) => s.id === id)?.name ?? id;
 
   const entries = useMemo(() => {
@@ -41,12 +42,12 @@ export default function SafetyLogPage() {
     const cutoff = range === "today" ? startToday : range === "7d" ? startToday - 6 * 86_400_000 : 0;
     return state.log
       .filter((e) => new Date(e.timestamp).getTime() >= cutoff)
-      .filter((e) => worker === "all" || e.worker_name === worker)
+      .filter((e) => zone === "all" || e.zone === zone)
       .filter((e) => level === "all" || e.risk_level === level)
       .filter((e) => intervention === "all" || matchesIntervention(e, intervention))
       .filter((e) => status === "all" || e.resolution === status)
       .sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-  }, [state.log, range, worker, level, intervention, status]);
+  }, [state.log, range, zone, level, intervention, status]);
 
   const groups = entries.reduce<Record<string, SafetyLogEntry[]>>((g, e) => {
     const k = dayLabel(e.timestamp);
@@ -55,15 +56,21 @@ export default function SafetyLogPage() {
   }, {});
 
   const exportCsv = () => {
-    const header = ["timestamp", "site", "worker", "task", "risk_level", "score", "intervention", "status", "supervisor", "notes"];
+    const header = [
+      "timestamp", "site", "zone", "task", "team", "temperature_c", "humidity_pct", "wbgt_c", "risk_level", "score",
+      "trigger", "recommended_intervention", "intervention_selected", "status", "supervisor_confirmation", "notes",
+    ];
     const esc = (v: string | number | undefined) => `"${String(v ?? "").replace(/"/g, '""')}"`;
     const lines = entries.map((e) =>
-      [e.timestamp, siteName(e.site_id), e.worker_name, e.task, e.risk_level, e.score, e.intervention, e.resolution, e.supervisor, e.notes].map(esc).join(","),
+      [
+        e.timestamp, siteName(e.site_id), e.zone, e.task, e.team, e.conditions.temperature, e.conditions.humidity, e.conditions.wbgt, e.risk_level, e.score,
+        e.trigger.join("; "), e.recommended.map((r) => RECOMMENDATION_LABEL[r]).join("; "), e.intervention, e.resolution, e.supervisor, e.notes,
+      ].map(esc).join(","),
     );
     const blob = new Blob([[header.join(","), ...lines].join("\n")], { type: "text/csv" });
     const a = document.createElement("a");
     a.href = URL.createObjectURL(blob);
-    a.download = `heatguard-safety-log-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.download = `sitesafe-si-safety-log-${new Date().toISOString().slice(0, 10)}.csv`;
     a.click();
     URL.revokeObjectURL(a.href);
   };
@@ -76,7 +83,8 @@ export default function SafetyLogPage() {
         title="Safety Log"
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            Every alert, intervention and override — timestamped and attributed. <SimulatedTag />
+            Every alert, intervention and override by site, zone and task — timestamped and attributed. No medical or physiological data is recorded.{" "}
+            <SimulatedTag>Demo data</SimulatedTag>
           </span>
         }
         actions={
@@ -97,10 +105,10 @@ export default function SafetyLogPage() {
           <option value="7d">Last 7 days</option>
           <option value="all">All time</option>
         </select>
-        <select aria-label="Worker" className={select} value={worker} onChange={(e) => setWorker(e.target.value)}>
-          <option value="all">All workers</option>
-          {workers.map((w) => (
-            <option key={w}>{w}</option>
+        <select aria-label="Zone" className={select} value={zone} onChange={(e) => setZone(e.target.value)}>
+          <option value="all">All zones</option>
+          {zones.map((z) => (
+            <option key={z}>{z}</option>
           ))}
         </select>
         <select aria-label="Risk level" className={select} value={level} onChange={(e) => setLevel(e.target.value as RiskLevel | "all")}>
@@ -139,19 +147,35 @@ export default function SafetyLogPage() {
                     <span className="tabular text-sm font-semibold">{hhmm(e.timestamp)}</span>
                     <div className="min-w-0">
                       <div className="flex flex-wrap items-center gap-2">
-                        <span className="font-medium">{e.worker_name}</span>
+                        <span className="font-medium">
+                          {e.task} · {e.zone}
+                        </span>
                         <RiskBadge level={e.risk_level} />
                         <span className="text-xs text-ink-3">
-                          {e.risk_level === "CRITICAL" ? "Critical" : "High"} heat risk detected · {e.score}/100 · {e.task} · {siteName(e.site_id)}
+                          {e.risk_level === "CRITICAL" ? "Critical" : "High"} heat risk · {e.score}/100 · {e.team} · {siteName(e.site_id)}
                         </span>
                       </div>
                       <dl className="mt-2 grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
                         <div className="flex gap-2">
-                          <dt className="text-ink-3">Intervention</dt>
+                          <dt className="shrink-0 text-ink-3">Conditions</dt>
+                          <dd className="tabular">
+                            {e.conditions.temperature}°C · {e.conditions.humidity}% · WBGT {e.conditions.wbgt}°C
+                          </dd>
+                        </div>
+                        <div className="flex gap-2">
+                          <dt className="shrink-0 text-ink-3">Trigger</dt>
+                          <dd>{e.trigger.join(" · ") || "—"}</dd>
+                        </div>
+                        <div className="flex gap-2">
+                          <dt className="shrink-0 text-ink-3">Recommended</dt>
+                          <dd className="text-ink-2">{e.recommended.map((r) => RECOMMENDATION_LABEL[r]).join(" · ") || "—"}</dd>
+                        </div>
+                        <div className="flex gap-2">
+                          <dt className="shrink-0 text-ink-3">Selected</dt>
                           <dd>{e.intervention}</dd>
                         </div>
                         <div className="flex gap-2">
-                          <dt className="text-ink-3">Supervisor</dt>
+                          <dt className="shrink-0 text-ink-3">Confirmed by</dt>
                           <dd>{e.supervisor}</dd>
                         </div>
                         {e.notes && (

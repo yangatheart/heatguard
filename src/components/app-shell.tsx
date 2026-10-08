@@ -25,27 +25,30 @@ import { useStore } from "@/lib/store";
 import { WorkflowProvider } from "./workflow";
 import { RiskBadge } from "./ui";
 
-export const SESSION_KEY = "heatguard-session";
+export const SESSION_KEY = "sitesafe-session";
 
 const NAV = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/workers", label: "Workers", icon: Users },
+  { href: "/teams", label: "Teams", icon: Users },
   { href: "/sites", label: "Sites", icon: Building2 },
   { href: "/safety-log", label: "Safety Log", icon: ScrollText },
   { href: "/analytics", label: "Analytics", icon: ChartColumn },
   { href: "/report", label: "Daily Report", icon: FileText },
-  { href: "/demo", label: "Demo Mode", icon: FlaskConical },
+  { href: "/demo", label: "Risk Simulator", icon: FlaskConical },
   { href: "/settings", label: "Settings", icon: Settings },
 ];
 
-export function Logo({ className }: { className?: string }) {
+export function Logo({ className, descriptor }: { className?: string; descriptor?: boolean }) {
   return (
     <div className={cx("flex items-center gap-2.5", className)}>
-      <div className="flex h-8 w-8 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#ff9a3c] to-[#e0383e] shadow-sm">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-gradient-to-br from-[#2b2b2e] to-[#0b0b0c] shadow-sm">
         <ShieldCheck className="h-[18px] w-[18px] text-white" strokeWidth={2.4} />
       </div>
-      <span className="text-[17px] font-semibold tracking-tight">
-        HeatGuard <span className="text-ink-3">AI</span>
+      <span className="leading-tight">
+        <span className="block text-[17px] font-semibold tracking-tight">
+          SiteSafe <span className="text-ink-3">SI</span>
+        </span>
+        {descriptor && <span className="block text-[11px] text-ink-3">Site Safety Super Intelligence</span>}
       </span>
     </div>
   );
@@ -96,7 +99,7 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
   const activeAlerts = state?.alerts.filter((a) => a.status === "active").length ?? 0;
   return (
     <div className="flex h-full flex-col gap-5 p-4">
-      <Logo className="px-1 pt-1" />
+      <Logo className="px-1 pt-1" descriptor />
       <SiteSelector />
       <nav className="flex flex-col gap-0.5">
         {NAV.map(({ href, label, icon: Icon }) => {
@@ -123,7 +126,13 @@ function Sidebar({ onNavigate }: { onNavigate?: () => void }) {
       </nav>
       <div className="mt-auto rounded-2xl border border-line bg-white p-3">
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">AM</div>
+          <div className="flex h-9 w-9 items-center justify-center rounded-full bg-ink text-xs font-semibold text-white">
+            {(state?.supervisor ?? "Alex Morgan")
+              .split(" ")
+              .map((p) => p[0])
+              .join("")
+              .slice(0, 2)}
+          </div>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-medium">{state?.supervisor ?? "Alex Morgan"}</p>
             <p className="truncate text-xs text-ink-3">Site Safety Manager</p>
@@ -251,7 +260,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         <footer className="mx-auto max-w-7xl px-4 pb-10 sm:px-6 lg:px-8">
           <div className="flex flex-col gap-2 border-t border-line pt-5 text-xs text-ink-3 sm:flex-row sm:items-center sm:justify-between">
             <p>Safety decisions remain subject to qualified occupational-health procedures and applicable regulations.</p>
-            <p>Prototype · simulated data · not a medical device</p>
+            <p>Prototype · demo data · not a health-monitoring or medical device</p>
           </div>
         </footer>
       </div>

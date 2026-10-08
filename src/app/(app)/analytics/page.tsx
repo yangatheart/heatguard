@@ -35,7 +35,7 @@ export default function AnalyticsPage() {
         title="Heat Risk Analytics"
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            All sites · last 7 days <SimulatedTag>Simulated demonstration data</SimulatedTag>
+            All sites · last 7 days · by task, zone and time of day <SimulatedTag>Demo data</SimulatedTag>
           </span>
         }
       />
@@ -79,7 +79,7 @@ export default function AnalyticsPage() {
       </div>
 
       <div className="grid gap-4 lg:grid-cols-3">
-        <ChartCard title="Risk by task" desc="High and critical events per task this week" className="lg:col-span-2">
+        <ChartCard title="Risk by task" desc="High and critical events per task type, all sites" className="lg:col-span-2">
           <ResponsiveContainer width="100%" height={300}>
             <BarChart data={a.byTask} layout="vertical" margin={{ top: 0, right: 48, left: 8, bottom: 0 }}>
               <CartesianGrid horizontal={false} stroke={GRID} />
@@ -93,6 +93,22 @@ export default function AnalyticsPage() {
           </ResponsiveContainer>
         </ChartCard>
 
+        <div className="space-y-4">
+        <ChartCard title="Risk by zone" desc="Zones generating the most high and critical events">
+          <ul className="space-y-2.5">
+            {a.byZone.map((z) => (
+              <li key={z.zone}>
+                <div className="flex justify-between text-sm">
+                  <span className="text-ink-2">{z.zone}</span>
+                  <span className="tabular font-semibold">{z.events}</span>
+                </div>
+                <div className="mt-1 h-1.5 rounded-full bg-line-2">
+                  <div className="h-full rounded-full bg-chart" style={{ width: `${(z.events / Math.max(1, a.byZone[0]?.events ?? 1)) * 100}%` }} />
+                </div>
+              </li>
+            ))}
+          </ul>
+        </ChartCard>
         <ChartCard title="Intervention effectiveness" desc="From alert to confirmed action to resolution">
           <Funnel steps={[["Alerts", a.alerts], ["Confirmed interventions", a.confirmed], ["Resolved", a.resolved]]} />
           <p className="mt-5 text-xs text-ink-3">
@@ -100,6 +116,7 @@ export default function AnalyticsPage() {
             {a.alerts ? Math.round((a.resolved / a.alerts) * 100) : 0}%. Demonstration figures only — not a measure of real-world outcomes.
           </p>
         </ChartCard>
+        </div>
       </div>
     </div>
   );

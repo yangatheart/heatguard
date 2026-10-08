@@ -6,8 +6,8 @@ import { Banner, Button, Card, EmptyState, PageHeader, RiskBadge, SimulatedTag }
 import { peakWindow, type ReportFacts } from "@/lib/analytics";
 import { actionsFor, templateSummary } from "@/lib/report";
 import { hhmm } from "@/lib/format";
-import { estimateWbgt, levelRank } from "@/lib/risk-engine";
-import { useDemo } from "@/lib/store";
+import { estimateWbgt, levelRank, topDrivers } from "@/lib/risk-engine";
+import { siteSnapshot, useDemo } from "@/lib/store";
 import type { RiskLevel } from "@/lib/types";
 
 interface ReportResult {
@@ -26,45 +26,51 @@ export default function ReportPage() {
   const site = state.sites.find((s) => s.id === state.currentSiteId)!;
 
   const buildFacts = (): ReportFacts => {
-    const workers = state.workers.filter((w) => w.site_id === site.id);
-    const ids = new Set(workers.map((w) => w.id));
+    const snap = siteSnapshot(state, site.id, assess);
     const today = new Date().toDateString();
     const isToday = (iso: string) => new Date(iso).toDateString() === today;
 
     const logged = state.log
       .filter((e) => e.site_id === site.id && isToday(e.timestamp))
-      .map((e) => ({ time: hhmm(e.timestamp), worker: e.worker_name, task: e.task, level: e.risk_level, intervention: e.intervention, status: e.resolution }));
-    const open = state.alerts
-      .filter((a) => a.status === "active" && ids.has(a.worker_id))
-      .map((a) => ({
-        time: hhmm(a.created_at),
-        worker: workers.find((w) => w.id === a.worker_id)!.name,
-        task: a.snapshot.task,
-        level: a.severity,
-        intervention: null,
-        status: "Awaiting supervisor confirmation",
-      }));
+      .map((e) => ({ time: hhmm(e.timestamp), zone: e.zone, task: e.task, team: e.team, level: e.risk_level, trigger: e.trigger, intervention: e.intervention, status: e.resolution }));
+    const open = snap.activeAlerts.map((a) => ({
+      time: hhmm(a.created_at),
+      zone: a.snapshot.zone,
+      task: a.snapshot.task,
+      team: a.snapshot.team,
+      level: a.severity,
+      trigger: a.trigger,
+      intervention: null,
+      status: "Awaiting supervisor confirmation",
+    }));
     const todaysEvents = [...logged, ...open].sort((a, b) => a.time.localeCompare(b.time));
 
-    const risks = workers.map((w) => ({ w, r: assess(w.id) }));
-    const involved = new Set(state.log.filter((e) => isToday(e.timestamp)).map((e) => e.worker_id));
+    const involved = new Set(state.log.filter((e) => isToday(e.timestamp)).map((e) => e.task_id));
     const factorCounts = new Map<string, number>();
-    risks
-      .filter(({ w, r }) => levelRank(r.level) >= 2 || involved.has(w.id) || state.alerts.some((a) => a.worker_id === w.id && a.status === "active"))
-      .forEach(({ r }) => r.factors.filter((f) => f.elevated && f.points > 0).forEach((f) => factorCounts.set(f.label, (factorCounts.get(f.label) ?? 0) + 1)));
+    snap.tasks
+      .filter(({ task, risk }) => levelRank(risk.level) >= 2 || involved.has(task.id))
+      .forEach(({ risk }) => topDrivers(risk, 5).forEach((f) => factorCounts.set(f.label, (factorCounts.get(f.label) ?? 0) + 1)));
 
-    const byLevel = risks.reduce((acc, { r }) => ({ ...acc, [r.level]: acc[r.level] + 1 }), { LOW: 0, MODERATE: 0, HIGH: 0, CRITICAL: 0 } as Record<RiskLevel, number>);
+    const byLevel = snap.tasks.reduce((acc, { risk }) => ({ ...acc, [risk.level]: acc[risk.level] + 1 }), { LOW: 0, MODERATE: 0, HIGH: 0, CRITICAL: 0 } as Record<RiskLevel, number>);
 
     return {
       date: new Date().toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", year: "numeric" }),
       site: site.name,
-      conditions: { temperature: site.temperature, humidity: site.humidity, wbgt: estimateWbgt(site.temperature, site.humidity), solar: site.solar, weatherOnline: site.weather_online },
-      workersMonitored: workers.length,
-      currentByLevel: byLevel,
+      conditions: {
+        temperature: site.temperature,
+        humidity: site.humidity,
+        wbgt: estimateWbgt(site.temperature, site.humidity),
+        windKmh: site.wind_kmh,
+        solar: site.solar,
+        weatherOnline: site.weather_online,
+      },
+      zonesMonitored: snap.zones.length,
+      tasksMonitored: snap.tasks.length,
+      currentTasksByLevel: byLevel,
+      highRiskZones: snap.highRiskZones.map((z) => z.zone.name),
       todaysEvents,
       peakWindowToday: peakWindow(todaysEvents.map((e) => Number(e.time.slice(0, 2)))),
-      topFactors: [...factorCounts.entries()].map(([factor, n]) => ({ factor, workers: n })).sort((a, b) => b.workers - a.workers).slice(0, 5),
-      heartRateUnavailable: risks.filter(({ r }) => r.heartRateMissing).length,
+      topFactors: [...factorCounts.entries()].map(([factor, n]) => ({ factor, tasks: n })).sort((a, b) => b.tasks - a.tasks).slice(0, 5),
       openAlerts: open.length,
       configuredMaxExposureMinutes: state.siteConfig.maxContinuousExposure,
       configuredBreakMinutes: state.siteConfig.breakMinutes,
@@ -101,7 +107,7 @@ export default function ReportPage() {
         title="Daily Safety Report"
         subtitle={
           <span className="flex flex-wrap items-center gap-2">
-            {site.name} · summarises today&apos;s simulated site data <SimulatedTag />
+            {site.name} · summarises today&apos;s site, zone and task data <SimulatedTag>Demo data</SimulatedTag>
           </span>
         }
         actions={
@@ -123,7 +129,7 @@ export default function ReportPage() {
           <EmptyState
             icon={FileText}
             title="No report generated yet"
-            body="HeatGuard summarises today's risk events, interventions and contributing factors into a short operational report. Recommended actions come from configured rules."
+            body="SiteSafe SI summarises today's site conditions, risk events, interventions and contributing factors into a short operational report. Recommended actions come from configured rules."
             action={
               <Button icon={Sparkles} onClick={generate}>
                 Generate daily report
@@ -186,7 +192,7 @@ export default function ReportPage() {
               ))}
             </ul>
             <p className="mt-5 text-xs text-ink-3">
-              The summary only restates recorded site data. Actions are derived from configured site rules, not generated by AI. HeatGuard does not set
+              The summary only restates recorded site data. Actions are derived from configured site rules, not generated by AI. SiteSafe SI does not set
               safety thresholds or provide medical recommendations.
             </p>
           </Card>
@@ -196,12 +202,13 @@ export default function ReportPage() {
               <h3 className="font-semibold">Data used</h3>
               <dl className="mt-3 space-y-2 text-sm">
                 {[
-                  ["Conditions", `${facts.conditions.temperature}°C · ${facts.conditions.humidity}% · WBGT ${facts.conditions.wbgt}°C`],
-                  ["Workers monitored", facts.workersMonitored],
+                  ["Conditions", `${facts.conditions.temperature}°C · ${facts.conditions.humidity}% · ${facts.conditions.windKmh} km/h`],
+                  ["WBGT (calculated)", `${facts.conditions.wbgt}°C`],
+                  ["Zones · tasks monitored", `${facts.zonesMonitored} · ${facts.tasksMonitored}`],
+                  ["High-risk zones", facts.highRiskZones.join(", ") || "—"],
                   ["Risk events today", facts.todaysEvents.length],
                   ["Peak window", facts.peakWindowToday ?? "—"],
                   ["Open alerts", facts.openAlerts],
-                  ["Heart rate unavailable", facts.heartRateUnavailable],
                 ].map(([k, v]) => (
                   <div key={String(k)} className="flex justify-between gap-3">
                     <dt className="text-ink-3">{k}</dt>
@@ -219,7 +226,9 @@ export default function ReportPage() {
                   {facts.todaysEvents.map((e, i) => (
                     <li key={i} className="flex items-center gap-3 text-sm">
                       <span className="tabular w-11 text-ink-3">{e.time}</span>
-                      <span className="flex-1 truncate">{e.worker}</span>
+                      <span className="flex-1 truncate">
+                        {e.task} <span className="text-ink-3">· {e.zone}</span>
+                      </span>
                       <RiskBadge level={e.level} />
                     </li>
                   ))}

@@ -47,7 +47,7 @@ export function Button({
   return (
     <button
       className={cx(
-        "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium transition-all active:scale-[0.98] disabled:cursor-not-allowed",
+        "inline-flex items-center justify-center gap-2 rounded-xl px-4 py-2.5 text-sm font-medium whitespace-nowrap transition-all active:scale-[0.98] disabled:cursor-not-allowed",
         v[variant],
         className,
       )}
@@ -71,7 +71,7 @@ export function PageHeader({ title, subtitle, actions }: { title: string; subtit
   );
 }
 
-export function SimulatedTag({ children = "Prototype · simulated data" }: { children?: ReactNode }) {
+export function SimulatedTag({ children = "Prototype · demo data" }: { children?: ReactNode }) {
   return (
     <span className="inline-flex items-center gap-1.5 rounded-full border border-dashed border-line bg-white px-2.5 py-0.5 text-[11px] font-medium text-ink-2">
       <span className="h-1.5 w-1.5 rounded-full bg-chart" />
@@ -225,5 +225,27 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
         </button>
       ))}
     </div>
+  );
+}
+
+/** Where a value comes from: sensor, calculation, supervisor input, tracking or configuration. */
+export function SourceTag({ source, className }: { source: string; className?: string }) {
+  return <span className={cx("text-[11px] whitespace-nowrap text-ink-3", className)}>{source}</span>;
+}
+
+export function Avatar({ name, size = 32 }: { name: string; size?: number }) {
+  const initials = name
+    .split(" ")
+    .map((p) => p[0])
+    .join("")
+    .slice(0, 2);
+  const hue = [...name].reduce((h, c) => h + c.charCodeAt(0), 0) % 360;
+  return (
+    <span
+      className="flex shrink-0 items-center justify-center rounded-full text-[11px] font-semibold"
+      style={{ width: size, height: size, background: `hsl(${hue} 30% 92%)`, color: `hsl(${hue} 25% 32%)`, fontSize: size * 0.34 }}
+    >
+      {initials}
+    </span>
   );
 }

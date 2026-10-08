@@ -14,14 +14,16 @@ import { actionsFor, templateSummary } from "@/lib/report";
 
 export const runtime = "nodejs";
 
-const SYSTEM = `You write the narrative summary for a construction-site heat-safety daily report.
+const SYSTEM = `You write the narrative summary for SiteSafe SI, a construction-site heat-safety daily report.
 Rules:
-- Use ONLY the facts in the JSON provided. Do not invent numbers, events, workers, times or causes.
-- Do not introduce thresholds, limits, durations or medical/clinical advice of any kind. Do not diagnose.
-- Use concise enterprise language: "heat risk detected", "risk assessment", "intervention". Never "medical diagnosis".
+- Use ONLY the facts in the JSON provided. Do not invent numbers, events, zones, tasks, teams, times or causes.
+- Do not introduce thresholds, limits, durations or medical/clinical advice of any kind.
+- The data is environmental (sensors, weather) and operational (tasks, zones, site configuration). Never describe or imply anything about a worker's body, health or physiological condition.
+- Talk about sites, zones, tasks and teams — not individual workers.
+- Use concise enterprise language: "heat risk detected", "risk assessment", "intervention".
 - 3–5 sentences, one paragraph, plain text, no headings, no lists, no markdown.
-- Refer to workers by the names given. Mention if any data was unavailable (heart rate or weather feed).
-- The data is simulated demonstration data; do not claim real-world outcomes.`;
+- Mention if the weather feed was unavailable.
+- The data is demonstration data; do not claim real-world outcomes.`;
 
 export async function POST(req: Request) {
   let facts: ReportFacts;

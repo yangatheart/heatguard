@@ -1,10 +1,25 @@
 // Domain model — mirrors supabase/schema.sql so the demo store can be swapped for Postgres.
+//
+// SiteSafe SI is site-first: risk is assessed per task, from measurable environmental
+// conditions (zone) and recorded operational inputs (task). No physiological, wearable
+// or medical data exists anywhere in this model.
 
 export type RiskLevel = "LOW" | "MODERATE" | "HIGH" | "CRITICAL";
-export type ActivityLevel = "Low" | "Moderate" | "Heavy";
-export type PpeLevel = "Low" | "Medium" | "High";
+export type Intensity = "Low" | "Moderate" | "Heavy";
+export type PpeCategory = "Light" | "Standard" | "Heavy";
 export type ShadeAvailability = "Good" | "Limited" | "None";
+export type CoolingAvailability = "Available" | "Limited" | "None";
 export type SolarExposure = "Low" | "Moderate" | "High";
+export type ZoneSetting = "Outdoor" | "Indoor" | "Covered";
+
+/** Where a value comes from — shown next to it in the UI. */
+export type DataSource =
+  | "Environmental sensor"
+  | "Calculated"
+  | "Supervisor input"
+  | "Site/task tracking"
+  | "Site configuration"
+  | "Demo scenario time";
 
 export interface Organization {
   id: string;
@@ -16,38 +31,57 @@ export interface Site {
   organization_id: string;
   name: string;
   location: string;
+  coordinates: string;
+  weather_station: string;
   status: "Normal" | "Elevated" | "Severe";
   temperature: number;
   humidity: number;
+  wind_kmh: number;
   solar: SolarExposure;
   weather_online: boolean;
   weather_last_update: string; // HH:MM, shown when the feed is offline
 }
 
+/** A monitored area of a site with its own environmental sensor. */
+export interface Zone {
+  id: string;
+  site_id: string;
+  name: string;
+  setting: ZoneSetting;
+  sensor_id: string;
+  temperature: number;
+  humidity: number;
+  wind_kmh: number;
+  solar: SolarExposure;
+  updated_at: string; // ISO
+}
+
+/** A work assignment: one team doing one task in one zone. The unit of risk. */
+export interface Task {
+  id: string;
+  site_id: string;
+  zone_id: string;
+  name: string;
+  team: string;
+  intensity: Intensity;
+  ppe: PpeCategory;
+  exposure_minutes: number;
+  shift_hours: number;
+  scenario_hour: number; // demo time of day, e.g. 14.5 = 14:30
+  shade: ShadeAvailability;
+  cooling: CoolingAvailability;
+  status: "Active" | "Monitoring" | "Intervention in place" | "Paused";
+  updated_at: string; // ISO
+}
+
+/** Kept for assignment and accountability only — no personal health data. */
 export interface Worker {
   id: string;
   site_id: string;
   name: string;
   role: string;
-  task: string;
-  baseline_heart_rate: number;
-  ppe_level: PpeLevel;
-  status: "Working" | "On break" | "Cooling down" | "Off shift";
-}
-
-export interface SensorReading {
-  id: string;
-  worker_id: string;
-  temperature: number;
-  humidity: number;
-  wbgt: number;
-  heart_rate: number | null; // null = wearable not reporting
-  activity_level: ActivityLevel;
-  exposure_minutes: number;
-  shade_available: ShadeAvailability;
-  solar: SolarExposure;
-  ppe_level: PpeLevel;
-  timestamp: string; // ISO
+  team: string;
+  task_id: string;
 }
 
 export interface RiskFactor {
@@ -57,38 +91,38 @@ export interface RiskFactor {
   points: number;
   max: number;
   elevated: boolean;
-  missing?: boolean;
+  source: DataSource;
 }
 
-export interface RiskAssessment {
-  id: string;
-  worker_id: string;
-  score: number;
-  risk_level: RiskLevel;
-  factors: RiskFactor[];
-  timestamp: string;
+export interface Conditions {
+  temperature: number;
+  humidity: number;
+  wbgt: number;
 }
 
 export type AlertStatus = "active" | "confirmed" | "escalated" | "dismissed" | "resolved";
 
+export type InterventionType =
+  | "Hydration"
+  | "Cooling/rest break"
+  | "Move activity to shade"
+  | "Work rotation"
+  | "Pause task"
+  | "Escalated to site safety manager";
+
 export interface Alert {
   id: string;
-  worker_id: string;
+  task_id: string;
+  zone_id: string;
   risk_assessment_id: string;
   severity: RiskLevel;
   message: string;
   status: AlertStatus;
   created_at: string;
-  recommended: string[];
-  snapshot: { temperature: number; humidity: number; exposure: number; task: string; score: number };
+  recommended: InterventionType[];
+  trigger: string[];
+  snapshot: Conditions & { wind_kmh: number; solar: SolarExposure; intensity: Intensity; exposure: number; task: string; zone: string; team: string; score: number };
 }
-
-export type InterventionType =
-  | "Cooling break"
-  | "Hydration"
-  | "Move to shade"
-  | "Work rotation"
-  | "Escalated to site medic";
 
 export interface Intervention {
   id: string;
@@ -101,13 +135,18 @@ export interface Intervention {
 
 export interface SafetyLogEntry {
   id: string;
-  worker_id: string;
-  worker_name: string;
   site_id: string;
+  zone_id: string;
+  zone: string;
+  task_id: string;
   task: string;
+  team: string;
+  conditions: Conditions;
   risk_level: RiskLevel;
   score: number;
-  intervention: string;
+  trigger: string[];
+  recommended: InterventionType[];
+  intervention: string; // actions selected by the supervisor
   resolution: "Resolved" | "Monitoring" | "Escalated" | "Dismissed";
   supervisor: string;
   notes?: string;
