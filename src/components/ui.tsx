@@ -230,7 +230,7 @@ export function Segmented<T extends string>({ value, options, onChange }: { valu
 
 /** Where a value comes from: sensor, calculation, supervisor input, tracking or configuration. */
 export function SourceTag({ source, className }: { source: string; className?: string }) {
-  return <span className={cx("text-[11px] whitespace-nowrap text-ink-3", className)}>{source}</span>;
+  return <span className={cx("text-[11px] leading-tight text-ink-3", className)}>{source}</span>;
 }
 
 export function Avatar({ name, size = 32 }: { name: string; size?: number }) {

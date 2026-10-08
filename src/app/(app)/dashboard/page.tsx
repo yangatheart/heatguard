@@ -106,7 +106,7 @@ export default function Dashboard() {
                   <Icon className="h-3.5 w-3.5" /> {label}
                 </div>
                 <p className="tabular mt-1 text-xl font-semibold">{value}</p>
-                <SourceTag source={source} />
+                <SourceTag source={source} className="block" />
               </div>
             ))}
           </div>
